@@ -1,0 +1,19 @@
+# Ignorer les dossiers de téléchargement (Les noms de Manhwas)
+*/Chapitre_*
+frames_tiktok/
+__pycache__/
+*.pyc
+
+# Ignorer les fichiers médias générés à la racine
+*.mp4
+*.mp3
+*.jpg
+*.png
+*.webp
+transcript.txt
+
+# Ignorer les environnements virtuels
+venv/
+env/
+.idea/
+.vscode/
