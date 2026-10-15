@@ -8,6 +8,7 @@ def chapter_progress(chapter, cfg):
 
     Une étape ne compte que si toutes les précédentes sont faites et à jour.
     """
+    from manhwa.bubbles import BUBBLES_VERSION
     from manhwa.ocr import ocr_key
     from manhwa.render import render_key
     from manhwa.tts import audio_key
@@ -16,7 +17,10 @@ def chapter_progress(chapter, cfg):
     frames = data["frames"]
     pages = len(chapter.pages())
     texts = [f for f in frames if f.get("text")]
-    ocr_done = bool(frames) and all(f.get("ocr_key") == ocr_key(f, data, cfg) for f in frames)
+    ocr_done = bool(frames) and all(
+        f.get("ocr_key") == ocr_key(f, data, cfg) and "lines" in f and f.get("bubbles_version") == BUBBLES_VERSION
+        for f in frames
+    )
     tts_done = ocr_done and all(
         f.get("audio_key") == audio_key(f["text"], cfg) and (chapter.root / f.get("audio", "")).is_file()
         for f in texts

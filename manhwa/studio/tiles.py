@@ -9,7 +9,7 @@ import json
 import cv2
 import numpy as np
 
-from manhwa.images import letterbox, load_strip, read_image, write_jpeg
+from manhwa.images import FLAT_RATIO, letterbox, load_strip, page_color, read_image, write_jpeg
 from manhwa.panels import STUDIO_DIR, horizontal_bounds, load_analysis, split_tall
 
 TILE_W = 600   # largeur d'affichage (≈ 2× la largeur à l'écran, pour rester net)
@@ -87,13 +87,22 @@ def panel_frames(chapter, meta, analysis, y0, y1):
 def preview(chapter, meta, analysis, y0, y1, x0=None, x1=None, size=(270, 480), bg_mode="auto"):
     """Aperçu 9:16 d'une frame, assemblé depuis les vignettes (rapide, sans recharger le strip).
 
-    x0/x1 (lignes du strip) : marges de la case ; sinon calculées sur ce morceau.
+    x0/x1 (lignes du strip) : marges de la case ; sinon calculées sur ce morceau. On prend
+    aussi un peu de page autour, pour reconnaître le fond uni comme le fait build_frames.
     """
-    crop, scale = _block(chapter, meta, analysis, y0, y1)
-    if crop is None:
+    margin = 12
+    top_y = max(0, y0 - margin)
+    block, scale = _block(chapter, meta, analysis, top_y, min(analysis["height"], y1 + margin))
+    if block is None:
         return None
+    top = round((y0 - top_y) * scale)
+    height = max(1, round((y1 - y0) * scale))
+    crop = block[top:top + height]
     if x0 is None or x1 is None:
         cx0, cx1 = horizontal_bounds(crop, 0, crop.shape[0])
     else:
         cx0, cx1 = round(x0 * scale), round(x1 * scale)
-    return letterbox(crop[:, cx0:cx1], size[0], size[1], bg_mode, 21)
+    around = None
+    if crop.shape[0] < FLAT_RATIO * (cx1 - cx0):  # même règle que flat_page_color
+        around = page_color(block, cx0, top, cx1 - cx0, crop.shape[0], band=max(2, round(8 * scale)))
+    return letterbox(crop[:, cx0:cx1], size[0], size[1], bg_mode, 21, around=around)

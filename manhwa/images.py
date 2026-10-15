@@ -105,19 +105,56 @@ def border_color(crop, band=3, tol=24, share=0.75):
     return tuple(int(v) for v in median) if close >= share else None
 
 
-def letterbox(crop, out_w, out_h, bg_mode="auto", blur_ksize=61):
+def page_color(image, x, y, w, h, band=8, tol=24, share=0.9):
+    """Couleur de la page tout autour de la case (x, y, w, h) dans `image`, si elle est unie.
+
+    Plus fiable que le bord de la case : une case rognée au ras de grosses lettres
+    (« MY GRANDFATHER PASSED AWAY. ») touche ses bords, mais la marge de la page autour,
+    elle, est blanche. None si la page autour n'est pas unie ou s'il n'y a pas de place.
+    """
+    H, W = image.shape[:2]
+    parts = [
+        image[max(0, y - band):y, x:x + w],
+        image[y + h:min(H, y + h + band), x:x + w],
+        image[y:y + h, max(0, x - band):x],
+        image[y:y + h, x + w:min(W, x + w + band)],
+    ]
+    ring = np.concatenate([p.reshape(-1, 3) for p in parts if p.size]) if any(p.size for p in parts) else None
+    if ring is None or len(ring) < 4 * band:
+        return None
+    ring = ring.astype(np.int16)
+    median = np.median(ring, axis=0)
+    close = (np.abs(ring - median).max(axis=1) <= tol).mean()
+    return tuple(int(v) for v in median) if close >= share else None
+
+
+FLAT_RATIO = 0.5  # une case moins haute que la moitié de sa largeur : bande de texte
+
+
+def flat_page_color(image, x, y, w, h):
+    """Couleur de la page autour d'une case plate (bande de texte), sinon None.
+
+    Seulement pour les cases plates : autour d'une case de dessin, la page est aussi
+    souvent blanche (les bulles débordent), mais celle-là rend mieux sur fond flou.
+    Mesuré sur le chapitre 1 : bandes de texte 52 à 260 px de haut, dessins ≥ 500 px.
+    """
+    return page_color(image, x, y, w, h) if h < FLAT_RATIO * w else None
+
+
+def letterbox(crop, out_w, out_h, bg_mode="auto", blur_ksize=61, around=None):
     """Place le crop au centre d'une image out_w x out_h.
 
     bg_mode "auto" : si la case est posée sur un fond uni (texte sur blanc, case sur
     noir), le fond reprend cette couleur et la case garde une marge de chaque côté,
     comme sur la page ; sinon fond flou. "blur" / "black" / "gray" : forcé.
+    around : couleur de la page autour de la case (page_color), si on la connaît.
     """
     if crop is None or crop.size == 0:
         return None
     ch, cw = crop.shape[:2]
 
     if bg_mode == "auto":
-        color = border_color(crop)
+        color = around if around is not None else border_color(crop)
         if color is None:
             bg_mode = "blur"
         else:

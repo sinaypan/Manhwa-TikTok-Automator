@@ -91,7 +91,7 @@ def test_build_frames_keeps_text_of_unchanged_crops(inbox):
     chapter = Chapter(inbox / "Série Test" / "chapter-001")
     assert build_frames(chapter, cfg) == 3
     data = chapter.load()
-    data["frames"][0].update({"text": "HELLO THERE", "ocr_key": "k"})
+    data["frames"][0].update({"text": "HELLO THERE", "ocr_key": "k", "lines": [{"text": "HELLO THERE"}], "bubbles": []})
     chapter.save(data)
     # on retire la 2e coupe : la 1re case ne change pas et garde son texte ; la case
     # fusionnée (1020 px, moins de 2 écrans) reste une seule frame
@@ -100,6 +100,7 @@ def test_build_frames_keeps_text_of_unchanged_crops(inbox):
     assert build_frames(chapter, cfg) == 2
     frames = chapter.load()["frames"]
     assert frames[0]["text"] == "HELLO THERE"
+    assert frames[0]["lines"] == [{"text": "HELLO THERE"}]  # pas besoin de relire la case
     assert [f["panel"] for f in frames] == [0, 1]
     assert "text" not in frames[1]
     assert sorted(p.name for p in chapter.frames_dir.iterdir()) == ["frame_0001.jpg", "frame_0002.jpg"]
@@ -117,3 +118,23 @@ def test_preview_announces_the_same_frames_as_the_video(client, inbox):
     announced = api.get("/api/panel", params={"id": CID, "y0": p["y0"], "y1": p["y1"]}).json()
     assert [[a, b - a] for a, b in announced["parts"]] == [[c[1], c[3]] for c in video]
     assert len(video) == 2  # 1 660 px > 2 écrans de 711 px
+
+
+def test_resort_bubbles_without_reading_images_again(inbox, monkeypatch):
+    """Quand seul le tri change, les bulles sont recalculées depuis les lignes gardées."""
+    import manhwa.ocr as ocr
+    from manhwa.bubbles import BUBBLES_VERSION
+
+    cfg = load_config()
+    chapter = Chapter(inbox / "Série Test" / "chapter-001")
+    build_frames(chapter, cfg)
+    data = chapter.load()
+    for f in data["frames"]:
+        f["lines"] = [{"text": "WHERE ARE YOU GOING", "conf": 0.99, "box": [10, 10, 300, 40]}]
+        f["ocr_key"] = ocr.ocr_key(f, data, cfg)
+        f["bubbles_version"] = BUBBLES_VERSION - 1
+    chapter.save(data)
+    monkeypatch.setattr(ocr, "read_crop_lines", lambda *a: (_ for _ in ()).throw(AssertionError("relu !")))
+    ocr.run_ocr(chapter, cfg)
+    frames = chapter.load()["frames"]
+    assert all(f["text"] == "WHERE ARE YOU GOING" and f["bubbles_version"] == BUBBLES_VERSION for f in frames)

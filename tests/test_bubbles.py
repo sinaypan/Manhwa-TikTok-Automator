@@ -84,3 +84,24 @@ def test_clean_fixes_one_read_as_i_but_keeps_real_numbers():
 def test_bench_match_counts_words_in_order():
     assert match("HE WAS CUT IN HALF.", "HE WAS CUT IN HALF") == (5, 5, 5)
     assert match("HE WAS CUT IN HALF.", "IN ay A qr") == (1, 5, 4)
+
+
+def test_small_random_letters_are_noise_but_big_ones_are_sfx():
+    assert kinds(to_bubbles([line("U", 300, 400, 20, 22, 0.4)], W)) == [("noise", "U")]
+    assert kinds(to_bubbles([line("Lyu", 528, 68, 272, 285, 0.49)], W)) == [("sfx", "Lyu")]
+
+
+def test_lone_number_is_not_a_title():
+    assert kinds(to_bubbles([line("3", 700, 1200, 20, 30)], W)) == [("number", "3")]
+    assert kinds(to_bubbles([line("Prologue", 290, 230, 180, 80)], W)) == [("title", "Prologue")]
+
+
+def test_tiny_marks_and_lone_letters_are_not_read():
+    # « I i i 2 » : traits de 7 px dans les plis d'un vêtement
+    marks = [line("I", 126, 1861, 20, 7, 0.25), line("i", 138, 1877, 20, 7, 0.36), line("i", 142, 1885, 40, 7, 0.87),
+             line("2", 147, 1894, 6, 5, 0.05)]
+    assert spoken_text(to_bubbles(marks, W)) is None
+    assert spoken_text(to_bubbles([line("U", 345, 214, 57, 46, 0.88)], W)) is None
+    assert kinds(to_bubbles([line("N I I", 503, 626, 278, 276, 0.09)], W)) == [("sfx", "N I I")]
+    # une vraie réplique d'une lettre, lue avec certitude, reste lue
+    assert spoken_text(to_bubbles([line("I...", 300, 200, 60, 45, 0.99)], W)) == "I..."

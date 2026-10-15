@@ -183,6 +183,7 @@ function loadChapter(ch) {
   state.panels = ch.panels;
   state.reviewed = !!ch.reviewed;
   state.checked = ch.checked || []; // cases hautes déjà vérifiées (début de la case)
+  state.confirmed = true; // state.panels vient du serveur (marges retirées)
   state.undo = [];
   state.doubt = -1;
 }
@@ -191,7 +192,9 @@ const isChecked = (p) => state.checked.some((y) => Math.abs(y - p.y0) < 40);
 
 function doubts() {
   const list = state.cuts.filter((c) => !c.sure).map((c) => ({ y: c.y, kind: 'cut' }));
-  if (!state.reviewed) {
+  // les cases très hautes ne comptent que sur les vraies cases renvoyées par le serveur : la découpe
+  // provisoire (affichée juste après un clic) garde les marges blanches et grossit les cases
+  if (!state.reviewed && state.confirmed) {
     for (const p of state.panels) {
       if (p.screens > TALL_DOUBT && !isChecked(p)) list.push({ y: Math.round((p.y0 + p.y1) / 2), kind: 'tall', panel: p });
     }
@@ -281,7 +284,6 @@ function renderSide() {
   const ep = findEpisode(ch.id);
   const job = ep?.job || ch.job;
   const progress = ep?.progress || ch.progress;
-  const n = doubts().length;
   const cards = [];
 
   if (job && (isRunning(job) || job.status === 'error')) cards.push(jobCard(job));
@@ -308,36 +310,47 @@ function renderSide() {
     ),
   );
 
-  if (n) {
-    const list = doubts();
-    const current = state.doubt >= 0 ? list[Math.min(state.doubt, n - 1)] : null;
-    const what = !current
-      ? 'Lignes en pointillés : coupe incertaine. Badge orange : case très haute, il manque peut-être une coupe.'
-      : current.kind === 'cut'
-        ? `Endroit ${Math.min(state.doubt, n - 1) + 1}/${n} : coupe incertaine. Garde-la, ou clique dessus pour la supprimer.`
-        : `Endroit ${Math.min(state.doubt, n - 1) + 1}/${n} : case très haute (${fmt(current.panel.screens)} écrans). Ajoute une coupe si ce sont plusieurs cases.`;
-    cards.push(
-      el(
-        'div',
-        { class: 'card', id: 'doubts-card' },
-        el('h3', { text: `${plural(n, 'endroit', 'endroits')} à vérifier` }),
-        el('p', { class: 'muted', text: what }),
-        el(
-          'div',
-          { class: 'actions', style: 'margin-top:10px;flex-wrap:wrap' },
-          current
-            ? el('button', { type: 'button', class: 'pill accent', onclick: keepDoubt }, icon('check'), 'C’est bon')
-            : el('button', { type: 'button', class: 'pill accent', onclick: nextDoubt }, icon('down'), 'Voir le premier'),
-          current ? el('button', { type: 'button', class: 'pill', onclick: nextDoubt }, icon('down'), 'Suivant') : null,
-          el('button', { type: 'button', class: 'pill', onclick: acceptAll }, 'Tout est bon'),
-        ),
-      ),
-    );
-  }
-
+  const doubtsBox = doubtsCard();
+  if (doubtsBox) cards.push(doubtsBox);
 
   if (showIntro()) cards.unshift(introCard());
   side.replaceChildren(...cards);
+}
+
+function doubtsCard() {
+  const list = doubts();
+  const n = list.length;
+  if (!n) return null;
+  const current = state.doubt >= 0 ? list[Math.min(state.doubt, n - 1)] : null;
+  const what = !current
+    ? 'Lignes en pointillés : coupe incertaine. Badge orange : case très haute, il manque peut-être une coupe.'
+    : current.kind === 'cut'
+      ? `Endroit ${Math.min(state.doubt, n - 1) + 1}/${n} : coupe incertaine. Garde-la, ou clique dessus pour la supprimer.`
+      : `Endroit ${Math.min(state.doubt, n - 1) + 1}/${n} : case très haute (${fmt(current.panel.screens)} écrans). Ajoute une coupe si ce sont plusieurs cases.`;
+  return el(
+    'div',
+    { class: 'card', id: 'doubts-card' },
+    el('h3', { text: `${plural(n, 'endroit', 'endroits')} à vérifier` }),
+    el('p', { class: 'muted', text: what }),
+    el(
+      'div',
+      { class: 'actions', style: 'margin-top:10px;flex-wrap:wrap' },
+      current
+        ? el('button', { type: 'button', class: 'pill accent', onclick: keepDoubt }, icon('check'), 'C’est bon')
+        : el('button', { type: 'button', class: 'pill accent', onclick: nextDoubt }, icon('down'), 'Voir le premier'),
+      current ? el('button', { type: 'button', class: 'pill', onclick: nextDoubt }, icon('down'), 'Suivant') : null,
+      el('button', { type: 'button', class: 'pill', onclick: acceptAll }, 'Tout est bon'),
+    ),
+  );
+}
+
+function refreshDoubts() {
+  // met à jour la carte « à vérifier » sans toucher à l'aperçu ; toujours d'accord avec le compteur du haut
+  const old = $('#doubts-card');
+  const fresh = doubtsCard();
+  if (old && fresh) old.replaceWith(fresh);
+  else if (old) old.remove();
+  else if (fresh) $('#side')?.append(fresh);
 }
 
 /* ---------- Mode d'emploi : affiché en haut à la première visite, rouvrable avec « ? » ---------- */
@@ -467,7 +480,7 @@ function showPreview(i) {
 }
 
 // ce que la voix lira pour la case survolée, et les SFX repérés (servent aux bruitages)
-const KIND_LABELS = { sfx: 'SFX', watermark: 'filigrane', credit: 'crédits', title: 'titre' };
+const KIND_LABELS = { sfx: 'SFX', noise: 'bruit', number: 'chiffre seul', watermark: 'filigrane', credit: 'crédits', title: 'titre' };
 
 function renderReading(frames) {
   const box = $('#reading');
@@ -478,14 +491,18 @@ function renderReading(frames) {
   }
   const spoken = frames.bubbles.filter((b) => b.kind === 'dialogue');
   const other = frames.bubbles.filter((b) => KIND_LABELS[b.kind]);
-  box.replaceChildren(
+  const parts = [
     spoken.length
       ? el('div', { class: 'spoken' }, ...spoken.map((b) => el('p', { text: `« ${b.text} »` })))
       : el('p', { class: 'muted', text: 'Rien à lire dans cette case.' }),
-    other.length
-      ? el('div', { class: 'chips' }, ...other.map((b) => el('span', { class: `chip ${b.kind}`, title: b.text, text: `${KIND_LABELS[b.kind]} · ${b.text.slice(0, 18)}` })))
-      : null,
-  );
+  ];
+  if (other.length) {
+    parts.push(
+      el('div', { class: 'chips' }, ...other.map((b) => el('span', { class: `chip ${b.kind}`, title: `${KIND_LABELS[b.kind]} (pas lu) : ${b.text}`, text: `${KIND_LABELS[b.kind]} · ${b.text.slice(0, 18)}` }))),
+      el('p', { class: 'muted', text: 'Pastilles : repéré mais pas lu par la voix. Les SFX serviront aux bruitages.' }),
+    );
+  }
+  box.replaceChildren(...parts);
 }
 
 /* ---------- Gestes sur les coupes ---------- */
@@ -556,6 +573,7 @@ function commit(cuts, message) {
   state.undo.push(snapshot());
   state.cuts = cuts.sort((a, b) => a.y - b.y);
   state.panels = localPanels();
+  state.confirmed = false;
   renderOverlays();
   renderHead();
   renderSide();
@@ -577,6 +595,7 @@ function undo() {
   state.reviewed = previous.reviewed;
   state.checked = previous.checked || [];
   state.panels = localPanels();
+  state.confirmed = false;
   renderOverlays();
   renderHead();
   renderSide();
@@ -599,9 +618,11 @@ function saveNow() {
     .then((res) => {
       if (state.chapter?.id !== id) return;
       state.panels = res.panels;
+      state.confirmed = true;
       state.chapter.edited = true;
       renderOverlays();
       renderHead();
+      refreshDoubts();
     })
     .catch((e) => toast(`Sauvegarde impossible : ${e.message}`));
   return saving;
@@ -609,10 +630,15 @@ function saveNow() {
 
 function nextDoubt() {
   const list = doubts();
-  if (!list.length) return;
+  if (!list.length) {
+    refreshDoubts();
+    renderHead();
+    toast('Plus rien à vérifier');
+    return;
+  }
   state.doubt = (state.doubt + 1) % list.length;
   focusDoubt(list[state.doubt]);
-  renderSide();
+  refreshDoubts();
 }
 
 function keepDoubt() {
@@ -634,17 +660,22 @@ function keepDoubt() {
 }
 
 function focusDoubt(target) {
+  // saut direct (le défilement animé ne démarre pas toujours sur un strip aussi long),
+  // puis l'endroit visé clignote pour qu'on le repère tout de suite
   const strip = $('#strip');
   const main = $('main');
   const top = strip.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop + target.y * scale();
-  main.scrollTo({ top: top - main.clientHeight / 2, behavior: 'smooth' });
+  main.scrollTo({ top: Math.max(0, top - main.clientHeight / 2) });
+  let node = null;
   if (target.kind === 'cut') {
-    const i = state.cuts.findIndex((c) => c.y === target.y);
-    const line = strip.querySelector(`.cut[data-i="${i}"]`);
-    line?.classList.remove('focus');
-    void line?.offsetWidth;
-    line?.classList.add('focus');
+    node = strip.querySelector(`.cut[data-i="${state.cuts.findIndex((c) => c.y === target.y)}"]`);
+  } else {
+    node = strip.querySelectorAll('.panel')[state.panels.indexOf(target.panel)];
   }
+  if (!node) return;
+  node.classList.remove('focus');
+  void node.offsetWidth; // relance l'animation
+  node.classList.add('focus');
 }
 
 function acceptAll() {

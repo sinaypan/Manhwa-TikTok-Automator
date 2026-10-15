@@ -5,8 +5,13 @@ Sortie : [{"text", "kind", "conf", "box"}] dans l'ordre de lecture, où kind vau
     "dialogue"  à lire (bulles, pensées, narration) ;
     "sfx"       onomatopée (coréenne ou anglaise) : pas lue, servira aux bruitages ;
     "silent"    bulle de ponctuation seule (« ... », « ! ») : pas lue ;
+    "noise"     1 à 4 lettres lues au hasard dans le dessin : pas lu ;
+    "number"    chiffre seul (numéro de page, chiffre du décor) : pas lu ;
     "watermark" / "credit" / "title" : filigrane du site, page de crédits, titre de chapitre.
 """
+
+BUBBLES_VERSION = 3  # à incrémenter quand le tri change : les bulles sont recalculées
+                     # depuis les lignes OCR gardées, sans relire le chapitre
 import re
 import statistics
 
@@ -110,6 +115,7 @@ def reading_order(bubbles):
 
 NOISE_CONF = 0.7       # sous cette confiance, un mot isolé de 1 à 4 lettres est du bruit
 HUGE_TEXT = 0.1        # lettres plus hautes que 10 % de la largeur de la case : onomatopée
+TINY_TEXT = 0.015      # lettres plus petites que 1,5 % de la largeur : traits du dessin
 
 
 def to_bubbles(lines, width, typical_height=None):
@@ -144,10 +150,19 @@ def to_bubbles(lines, width, typical_height=None):
             low_conf = bubble["conf"] is not None and bubble["conf"] < NOISE_CONF
             if CREDIT.search(text):
                 kind = "credit"  # « READ AT … FOR THE FASTEST RELEASES » découpé en mots
-            elif TITLE.match(text) or (len(words) <= 1 and text.isdigit()):
+            elif TITLE.match(text):
                 kind = "title"
+            elif not words and re.fullmatch(r"[\d\s.,:/-]+", text):
+                kind = "number"  # chiffre seul : numéro de page, de chapitre, chiffre du décor
+            elif height < TINY_TEXT * width:
+                kind = "noise"  # minuscule (traits du dessin) : le dialogue fait 35 à 55 px de haut
+            elif words and all(len(w.strip("'")) <= 1 for w in words) and not (bubble["conf"] or 0) >= 0.95:
+                # que des lettres isolées (« I i i 2 », « N I I ») sans lecture quasi certaine
+                kind = "sfx" if big else "noise"
             elif letters <= 4 and len(words) <= 2 and low_conf:
-                kind = "sfx"  # coréen stylisé ou décor lu comme 1 à 4 lettres au hasard
+                # 1 à 4 lettres lues au hasard : en très gros, c'est un SFX coréen stylisé ;
+                # en petit, une forme du dessin prise pour une lettre (bruit)
+                kind = "sfx" if big else "noise"
             elif words and len(words) <= 3 and (
                 all(w.lower().strip("'") in SFX_WORDS for w in words)
                 # 1 à 3 mots en très gros ET lus avec hésitation ou lettres répétées (« KRAAAK ») ;

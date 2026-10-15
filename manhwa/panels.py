@@ -293,9 +293,13 @@ def ensure_cuts(chapter, cfg, data=None, analysis=None):
     return data, analysis
 
 
+# ce qu'une frame garde quand son crop n'a pas changé : pas besoin de relire ni de revoicer
+KEPT_FRAME_KEYS = ("lines", "bubbles", "bubbles_version", "text", "ocr_key", "audio", "audio_key")
+
+
 def build_frames(chapter, cfg, bg_mode=None, progress=None):
     """Écrit les frames 9:16 d'après les coupes, en gardant OCR et voix des crops inchangés."""
-    from manhwa.images import letterbox, write_jpeg
+    from manhwa.images import flat_page_color, letterbox, write_jpeg
 
     sc = cfg["slicer"]
     strip, used = load_strip(chapter.pages(), sc["max_src_width"])
@@ -314,11 +318,11 @@ def build_frames(chapter, cfg, bg_mode=None, progress=None):
         x, y, w, h = crop
         name = f"frame_{i:04d}.jpg"
         out = letterbox(strip[y:y + h, x:x + w], cfg["output"]["width"], cfg["output"]["height"],
-                        bg_mode, sc["blur_ksize"])
+                        bg_mode, sc["blur_ksize"], around=flat_page_color(strip, x, y, w, h))
         write_jpeg(chapter.frames_dir / name, out, sc["jpeg_quality"])
         if progress:
             progress(i, len(crops))
-        frame = {k: v for k, v in previous.get(tuple(crop), {}).items() if k in ("text", "ocr_key", "audio", "audio_key")}
+        frame = {k: v for k, v in previous.get(tuple(crop), {}).items() if k in KEPT_FRAME_KEYS}
         frame.update({"file": name, "crop": crop, "bg": bg_mode, "panel": panel})
         frames.append(frame)
 

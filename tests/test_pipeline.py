@@ -91,3 +91,27 @@ def test_audio_key_follows_text_and_voice():
     assert audio_key("Hello world", cfg) != key
     cfg["tts"]["voice"] = "fr-FR-HenriNeural"
     assert audio_key("Hello there", cfg) != key
+
+
+def test_flat_text_strip_takes_the_page_color_even_when_letters_touch_its_edges():
+    """Régression : « MY GRANDFATHER PASSED AWAY. » rogné au ras de grosses lettres → fond flou."""
+    import cv2
+
+    from manhwa.images import flat_page_color
+
+    page = np.full((400, 800, 3), 255, np.uint8)
+    cv2.putText(page, "MY GRANDFATHER", (60, 200), cv2.FONT_HERSHEY_SIMPLEX, 2.6, (10, 10, 10), 12)
+    ys, xs = np.nonzero((page < 128).any(axis=2))
+    x, y, w, h = xs.min(), ys.min(), xs.max() - xs.min() + 1, ys.max() - ys.min() + 1  # rognée au ras
+    around = flat_page_color(page, x, y, w, h)
+    assert around == (255, 255, 255)
+    out = letterbox(page[y:y + h, x:x + w], 1080, 1920, "auto", around=around)
+    assert out[0, 0].tolist() == [255, 255, 255]
+
+
+def test_tall_art_panel_keeps_the_blur_even_on_a_white_page():
+    from manhwa.images import flat_page_color
+
+    page = np.full((1400, 800, 3), 255, np.uint8)
+    page[100:1300, 50:750] = np.random.default_rng(2).integers(0, 255, (1200, 700, 3), dtype=np.uint8)
+    assert flat_page_color(page, 50, 100, 700, 1200) is None
