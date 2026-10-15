@@ -198,6 +198,7 @@ def create_app(cfg):
         for w in (wiki_data or {}).get("characters", []):
             people.append({k: w.get(k) for k in ("id", "title", "name", "gender", "hair", "debut", "personality")}
                           | {"url": wiki_data["base"] + w["url"], "image": (w.get("files") or [None])[0],
+                             "thumb": wiki.thumb_path(series, w["id"]).is_file(),
                              "later": bool(w.get("debut") and number and w["debut"] > number)})
         return {
             "wiki": {"sitename": wiki_data["sitename"], "fetched": wiki_data["fetched"],
@@ -268,6 +269,14 @@ def create_app(cfg):
         chapter = chapter_of(id)
         return jobs.submit(id, chapter, kind="wiki_images" if images else "wiki")
 
+    @app.get("/api/wiki_thumb")
+    def wiki_thumb(id: str = Query(...), w: str = Query(..., pattern=r"^w\d+$")):
+        """La tête d'un personnage du wiki (pour la liste des noms)."""
+        path = wiki.thumb_path(cast.series_dir(chapter_of(id)), w)
+        if not path.is_file():
+            raise HTTPException(404, "Pas d'image")
+        return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "max-age=3600"})
+
     @app.get("/api/wiki_image")
     def wiki_image(id: str = Query(...), f: str = Query(..., pattern=r"^w\d+-\d+\.img$")):
         chapter = chapter_of(id)
@@ -312,6 +321,16 @@ def create_app(cfg):
             raise HTTPException(404, "Frame introuvable")
         cx, cy, cw, ch = match["crop"]
         img = tiles.region(chapter, meta, analysis, cx, cy + y, cw, min(h, ch - y), out_w=w)
+        if img is None:
+            raise HTTPException(404, "Aperçu impossible")
+        ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        return Response(buf.tobytes(), media_type="image/jpeg", headers={"Cache-Control": "max-age=600"})
+
+    @app.get("/api/strip")
+    def strip_region(id: str = Query(...), y: int = Query(0, ge=0), h: int = Query(..., gt=0), w: int = Query(480, ge=120, le=720)):
+        """Un morceau du chapitre sur toute sa largeur : le contexte d'une réplique ou d'un visage."""
+        chapter, analysis, meta, _ = prepared(id)
+        img = tiles.region(chapter, meta, analysis, 0, y, analysis["width"], min(h, analysis["height"] - y), out_w=w)
         if img is None:
             raise HTTPException(404, "Aperçu impossible")
         ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])

@@ -81,7 +81,7 @@ modèles (≈ 90 Mo) sont téléchargés au premier usage dans `.cache/models/`.
 | Écrire dans le champ d'un groupe | Nommer le personnage (pour toute la série) ; la liste propose les noms du wiki |
 | Clic sur un nom « Wiki : … » | Nommer d'après le wiki (genre, cheveux, caractère affichés) |
 | « Ne parle pas » | Ranger le personnage à part : il n'est plus jamais proposé pour une réplique |
-| Survol d'un visage ou d'une image | La case d'où il vient, en grand |
+| Survol d'un visage ou d'une image | Le chapitre autour, en grand (la case de la vidéo encadrée en pointillés) |
 | Clic sur des visages, puis sur un personnage dans la barre du bas | Les ranger (ou « Nouveau personnage », « Pas un visage ») |
 | Clic sur le nombre d'un groupe | Sélectionner tous ses visages (pour fusionner deux groupes) |
 | Clic sur une tête dans l'image d'une réplique, ou sur sa pastille | Dire qui parle |

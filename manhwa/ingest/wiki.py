@@ -306,19 +306,30 @@ def fetch_images(series, progress=None, say=print):
     return sum(map(len, saved.values()))
 
 
+def thumb_path(series, wid):
+    return wiki_dir(series) / f"thumb-{wid}.jpg"
+
+
 def embed_wiki_faces(series, progress=None):
-    """Repère les visages sur les images du wiki et les décrit comme ceux des chapitres."""
+    """Repère les visages sur les images du wiki et les décrit comme ceux des chapitres.
+
+    Écrit aussi une vignette par personnage (sa plus grande tête trouvée, sinon le haut
+    de sa première image) : c'est elle qu'on voit dans la liste des noms du Studio.
+    """
     import cv2
     import numpy as np
 
-    from manhwa.faces import detect, embed, head_box
-    from manhwa.images import read_image
+    from manhwa.faces import THUMB, detect, embed, head_box
+    from manhwa.images import read_image, write_jpeg
 
     data = load_wiki(series)
     if not data:
         return 0
     folder = wiki_dir(series)
+    for old in folder.glob("thumb-*.jpg"):
+        old.unlink()
     owners, vecs = [], []
+    heads = {}  # personnage → (surface, tête) la plus grande
     files = [(c["id"], f) for c in data["characters"] for f in c.get("files", [])]
     for i, (cid, name) in enumerate(files, 1):
         img = read_image(folder / name)
@@ -327,12 +338,20 @@ def embed_wiki_faces(series, progress=None):
             if w < 600:  # les détecteurs sont réglés pour des cases de manhwa (≈ 800 px de large)
                 img = cv2.resize(img, (800, round(h * 800 / w)), interpolation=cv2.INTER_CUBIC)
                 h, w = img.shape[:2]
+            if cid not in heads:  # repli : le haut de la première image, en carré
+                side = min(w, h)
+                heads[cid] = (0, img[:side, (w - side) // 2:(w - side) // 2 + side])
             for box in detect(img):
                 x, y, bw, bh = head_box(box, w, h)
+                head = img[y:y + bh, x:x + bw]
                 owners.append(cid)
-                vecs.append(embed(img[y:y + bh, x:x + bw]))
+                vecs.append(embed(head))
+                if bw * bh > heads[cid][0]:
+                    heads[cid] = (bw * bh, head)
         if progress:
             progress(i, len(files))
+    for cid, (_, head) in heads.items():
+        write_jpeg(thumb_path(series, cid), cv2.resize(head, (THUMB, THUMB), interpolation=cv2.INTER_AREA), 88)
     tmp = folder / "faces.part.npz"
     np.savez(tmp, owners=np.array(owners), vecs=np.stack(vecs) if vecs else np.zeros((0, 384), np.float32))
     os.replace(tmp, folder / "faces.npz")

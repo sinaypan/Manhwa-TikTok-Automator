@@ -902,7 +902,6 @@ function charsSection() {
       el('div', { class: 'grow' }, el('h3', { text: 'Personnages' }), el('p', { class: 'muted', text: 'Donne un nom à chaque groupe (ou clique sur un nom du wiki). Un visage mal rangé ? Clique dessus, puis sur le bon personnage dans la barre du bas.' })),
       wikiStatus(),
     ),
-    el('datalist', { id: 'wiki-names' }, c.people.filter((w) => !w.later).map((w) => el('option', { value: w.title }))),
     el('div', { class: 'cast-grid' }, cards),
     silent.length
       ? el(
@@ -935,14 +934,19 @@ function charCard(ch) {
         value: ch.name,
         placeholder: `Perso ${ch.i + 1} · qui est-ce ?`,
         'aria-label': 'Nom du personnage',
-        list: 'wiki-names',
         maxlength: 40,
+        autocomplete: 'off',
+        onfocus: (e) => openPicker(ch, e.target),
+        onblur: () => setTimeout(closePicker, 150),
         onchange: (e) => {
           // un nom choisi dans la liste du wiki lie aussi sa fiche
           const page = state.cast.people.find((w) => w.title === e.target.value.trim());
           updateChar(ch.id, page ? { name: page.title, wiki: page.id } : { name: e.target.value });
         },
-        onkeydown: (e) => e.key === 'Enter' && e.target.blur(),
+        onkeydown: (e) => {
+          if (e.key === 'Enter') e.target.blur();
+          if (e.key === 'Escape') closePicker();
+        },
       }),
       el('button', { type: 'button', class: 'count', title: 'Sélectionner tous ses visages', onclick: () => selectFaces(ch.faces) }, String(ch.faces.length)),
     ),
@@ -954,6 +958,64 @@ function charCard(ch) {
       el('button', { type: 'button', class: 'link quiet', title: ch.silent ? 'Il peut être proposé pour les répliques' : 'Il ne sera plus proposé pour les répliques', onclick: () => updateChar(ch.id, { silent: !ch.silent }) }, ch.silent ? 'Parle' : 'Ne parle pas'),
     ),
   );
+}
+
+/* Liste des noms du wiki sous le champ : les têtes, les propositions d'abord */
+
+function closePicker() {
+  $('#picker')?.remove();
+}
+
+function pickerThumb(w) {
+  if (!w.thumb) return el('span', { class: 'pick-thumb' }, w.title.split(/\s+/).map((p) => p[0]).join('').slice(0, 2));
+  return el('img', { class: 'pick-thumb', src: `/api/wiki_thumb?id=${enc(state.chapter.id)}&w=${enc(w.id)}`, alt: '' });
+}
+
+function openPicker(ch, input) {
+  closePicker();
+  const c = state.cast;
+  if (!c.people.length) return;
+  const box = el('div', { class: 'picker', id: 'picker' });
+  input.closest('.who-head').append(box);
+  const pick = (w) => {
+    closePicker();
+    input.value = w.title;
+    updateChar(ch.id, { name: w.title, wiki: w.id });
+  };
+  const row = (w, proposed) => {
+    const owner = c.characters.find((x) => x.wiki === w.id && x.id !== ch.id);
+    const facts = [w.debut ? `dès le ch. ${w.debut}` : null, w.gender, w.hair && `cheveux : ${w.hair.split(/[,(]/)[0].trim()}`].filter(Boolean).join(' · ');
+    return el(
+      'button',
+      // mousedown : avant que le champ perde le focus (et ferme la liste)
+      { type: 'button', class: `pick-row${proposed ? ' proposed' : ''}${owner ? ' taken' : ''}`, onmousedown: (e) => { e.preventDefault(); pick(w); } },
+      pickerThumb(w),
+      el('span', { class: 'pick-text' }, el('b', { text: w.title }), el('span', { class: 'muted', text: facts })),
+      owner ? el('span', { class: 'pick-tag', text: `déjà : ${charLabel(owner.id)}` }) : proposed ? el('span', { class: 'pick-tag accent', text: 'proposé' }) : null,
+    );
+  };
+  const render = () => {
+    const q = input.value.trim().toLowerCase();
+    const match = (w) => !q || w.title.toLowerCase().includes(q) || (w.name || '').toLowerCase().includes(q);
+    // jamais les personnages qui n'apparaissent que plus tard (spoiler)
+    const people = c.people.filter((w) => !w.later && match(w));
+    const proposed = ch.suggest.map(person).filter((w) => w && match(w));
+    // ceux déjà donnés à un autre groupe passent à la fin
+    const taken = new Set(c.characters.filter((x) => x.wiki && x.id !== ch.id).map((x) => x.wiki));
+    const rest = people.filter((w) => !ch.suggest.includes(w.id)).sort((a, b) => taken.has(a.id) - taken.has(b.id));
+    const groups = [
+      ['Proposés', proposed, true],
+      ['Déjà apparus', rest.filter((w) => w.debut), false],
+      ['Apparition inconnue', rest.filter((w) => !w.debut), false],
+    ].filter(([, list]) => list.length);
+    box.replaceChildren(
+      ...(groups.length
+        ? groups.map(([title, list, isProposed]) => el('div', { class: 'pick-group' }, el('p', { class: 'pick-title', text: title }), list.map((w) => row(w, isProposed))))
+        : [el('p', { class: 'muted pick-empty', text: 'Aucun personnage du wiki à ce nom : Entrée pour garder le nom tapé.' })]),
+    );
+  };
+  input.addEventListener('input', render);
+  render();
 }
 
 function wikiLine(ch) {
@@ -1046,27 +1108,42 @@ function faceThumb(fid) {
 /* Aperçu agrandi au survol : la case d'où vient un visage, ou une réplique en grand */
 
 let peekTimer;
-function showPeek(anchor, frame, view, boxes, width) {
+const CONTEXT = 1.8; // hauteur montrée autour de la case, en largeurs de chapitre
+
+function showContext(anchor, crop, boxes) {
+  // boxes : [[classe, [x, y, w, h] dans le repère de la case], ...]
   clearTimeout(peekTimer);
   peekTimer = setTimeout(() => {
-    const [, vy, vw, vh] = view;
+    const W = state.chapter.width;
+    const H = state.chapter.height;
+    const [cx, cy, cw, ch] = crop;
+    // la case entière et un peu de ce qui l'entoure ; une case très haute : centrée sur la bulle ou le visage
+    const span = Math.min(H, Math.max(CONTEXT * W, Math.min(ch + 0.8 * W, 2.6 * W)));
+    const focus = ch + 0.8 * W <= span ? cy + ch / 2 : cy + boxes[0][1][1] + boxes[0][1][3] / 2;
+    const y0 = Math.round(Math.max(0, Math.min(H - span, focus - span / 2)));
+    const view = [0, y0, W, Math.round(span)];
+    const toStrip = ([x, y, w, h]) => [cx + x, cy + y, w, h];
     let box = $('#peek');
     if (!box) document.body.append((box = el('div', { id: 'peek' })));
-    const shot = el(
-      'div',
-      { class: 'shot', style: `aspect-ratio:${vw}/${vh}` },
-      el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(frame)}&y=${vy}&h=${vh}&w=${width >= 400 ? 600 : 360}`, alt: '' }),
-      boxes.map(([cls, b]) => el('span', { class: cls, style: boxStyle(b, view) })),
+    box.replaceChildren(
+      el(
+        'div',
+        { class: 'shot', style: `aspect-ratio:${W}/${view[3]}` },
+        el('img', { src: `/api/strip?id=${enc(state.chapter.id)}&y=${view[1]}&h=${view[3]}&w=600`, alt: '' }),
+        el('span', { class: 'frame-box', style: boxStyle([cx, cy, cw, ch], view) }),
+        boxes.map(([cls, b]) => el('span', { class: cls, style: boxStyle(toStrip(b), view) })),
+      ),
+      el('p', { class: 'peek-caption', text: 'Cadre : la case de la vidéo · autour : le chapitre' }),
     );
-    box.replaceChildren(shot);
-    // à côté de l'élément survolé, sans sortir de l'écran
+    // à côté de l'élément survolé, aussi grand que l'écran le permet
     const r = anchor.getBoundingClientRect();
-    const h = Math.min(window.innerHeight - 24, (width * vh) / vw);
-    const w = (h * vw) / vh;
-    box.style.width = `${w}px`;
-    const left = r.right + 12 + w < window.innerWidth ? r.right + 12 : Math.max(12, r.left - 12 - w);
+    const h = window.innerHeight - 70;
+    const w = Math.min(560, (h * W) / view[3]);
+    const imgH = (w * view[3]) / W;
+    box.style.width = `${w + 12}px`;
+    const left = r.right + 12 + w < window.innerWidth ? r.right + 12 : Math.max(12, r.left - 24 - w);
     box.style.left = `${left}px`;
-    box.style.top = `${Math.max(12, Math.min(window.innerHeight - h - 12, r.top + r.height / 2 - h / 2))}px`;
+    box.style.top = `${Math.max(12, Math.min(window.innerHeight - imgH - 50, r.top + r.height / 2 - imgH / 2))}px`;
     box.hidden = false;
   }, 180);
 }
@@ -1079,7 +1156,7 @@ function hidePeek() {
 
 function peekFace(fid, anchor) {
   const v = state.cast?.face_views?.[fid];
-  if (v) showPeek(anchor, v.frame, v.view, [['face-box on', v.box]], 340);
+  if (v) showContext(anchor, v.crop, [['face-box on', v.box]]);
 }
 
 function paintSelection() {
@@ -1236,7 +1313,7 @@ function lineRow(l) {
         class: 'shot',
         style: `aspect-ratio:${vw}/${vh}`,
         // survol : la même image en grand (les cadres des visages restent cliquables)
-        onmouseenter: (e) => showPeek(e.currentTarget, l.frame, l.view, [['bubble-box', l.box], ...l.faces.map((f) => ['face-box', f.box])], 480),
+        onmouseenter: (e) => showContext(e.currentTarget, l.crop, [['bubble-box', l.box], ...l.faces.map((f) => ['face-box', f.box])]),
         onmouseleave: hidePeek,
       },
       el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(l.frame)}&y=${vy}&h=${vh}`, alt: '', loading: 'lazy' }),

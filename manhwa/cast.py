@@ -331,7 +331,7 @@ def face_views(data):
         _, _, w, h = frame["crop"]
         height = min(h, round(1.3 * w))
         y0 = max(0, min(round(_center(face["box"])[1] - height / 2), h - height))
-        out[face["id"]] = {"frame": face["frame"], "box": face["box"], "view": [0, y0, w, height]}
+        out[face["id"]] = {"frame": face["frame"], "box": face["box"], "view": [0, y0, w, height], "crop": frame["crop"]}
     return out
 
 
@@ -410,6 +410,7 @@ def lines(data, cast):
                 "suggestion": ranked[0] if ranked else None,
                 "candidates": ranked[:4],
                 "view": _view(frame, bubble, here),
+                "crop": frame["crop"],
                 "faces": [{"id": f["id"], "box": f["box"], "char": f["char"]} for f in here],
             })
     return out
