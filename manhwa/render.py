@@ -56,6 +56,7 @@ def run_render(chapter, cfg, force=False, progress=None):
     from moviepy import ImageClip, concatenate_videoclips
 
     r = cfg["render"]
+    speed = float(r.get("speed", 1.0))  # la voix est déjà accélérée (tts.voice_rate) : on raccourcit les blancs
     clips, audios = [], []
     for frame in data["frames"]:
         img = chapter.frames_dir / frame["file"]
@@ -65,9 +66,9 @@ def run_render(chapter, cfg, force=False, progress=None):
         audio = _load_audio(chapter.root / frame["audio"]) if frame.get("audio") else None
         if audio:
             audios.append(audio)
-            clip = ImageClip(str(img)).with_duration(audio.duration + r["padding_seconds"]).with_audio(audio)
+            clip = ImageClip(str(img)).with_duration(audio.duration + r["padding_seconds"] / speed).with_audio(audio)
         else:
-            clip = ImageClip(str(img)).with_duration(r["silent_frame_seconds"])
+            clip = ImageClip(str(img)).with_duration(r["silent_frame_seconds"] / speed)
         clips.append(clip)
 
     if not clips:

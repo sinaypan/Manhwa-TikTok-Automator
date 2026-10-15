@@ -10,8 +10,9 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from manhwa import cast
 from manhwa.config import inbox_dir
-from manhwa.panels import ensure_cuts, find_gutters, panels_from_cuts
+from manhwa.panels import ensure_cuts, find_gutters, load_analysis, panels_from_cuts
 from manhwa.progress import chapter_progress
 from manhwa.project import Chapter, find_chapters, is_chapter_dir
 from manhwa.studio import tiles
@@ -164,6 +165,120 @@ def create_app(cfg):
             raise HTTPException(404, "Aperçu impossible")
         ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
         return Response(buf.tobytes(), media_type="image/jpeg")
+
+    # ---------- Personnages ----------
+
+    def cast_lock(chapter):
+        return lock_for(f"cast:{cast.series_dir(chapter)}")  # les personnages sont partagés par la série
+
+    def cast_detail(id):
+        from manhwa.faces import faces_key
+
+        chapter = chapter_of(id)
+        data = chapter.load()
+        crew = cast.load_cast(chapter)
+        faces = cast.chapter_faces(data)
+        if "faces" not in data:
+            status = "missing"
+        elif data["faces"]["key"] != faces_key(load_analysis(chapter, cfg, compute=False), data["frames"]):
+            status = "stale"  # la découpe a changé depuis
+        else:
+            status = "ready"
+        characters = [{"id": c["id"], "name": c["name"], "cover": c.get("cover"),
+                       "faces": [f["id"] for f in faces if f.get("char") == c["id"] and not f.get("not_face")]}
+                      for c in crew["characters"]]
+        return {
+            "status": status,
+            "frames": len(data["frames"]),
+            "ocr_done": any("bubbles" in f for f in data["frames"]),
+            "characters": characters,
+            "unsorted": [f["id"] for f in faces if not f.get("char") and not f.get("not_face")],
+            "rejected": [f["id"] for f in faces if f.get("not_face")],
+            "lines": cast.lines(data, crew) if status != "missing" else [],
+            "narrator": cast.NARRATOR,
+            "job": jobs.get(id),
+        }
+
+    @app.get("/api/cast")
+    def cast_get(id: str = Query(...)):
+        return cast_detail(id)
+
+    @app.post("/api/cast/analyze")
+    def cast_analyze(id: str = Query(...), force: bool = Query(False)):
+        chapter = chapter_of(id)
+        with lock_for(id):
+            data = chapter.load()
+            if not data["frames"]:
+                raise HTTPException(422, "Crée d'abord la vidéo : les visages se cherchent dans ses frames")
+            if force and data.get("faces"):
+                data["faces"]["key"] = None  # chercher à nouveau ; les visages déjà rangés servent de modèles
+                chapter.save(data)
+        return jobs.submit(id, chapter, kind="faces")
+
+    @app.post("/api/cast/move")
+    def cast_move(id: str = Query(...), payload: dict = Body(...)):
+        chapter = chapter_of(id)
+        with cast_lock(chapter), lock_for(id):
+            data = chapter.load()
+            crew = cast.load_cast(chapter)
+            try:
+                target = cast.move_faces(chapter, data, crew, [str(f) for f in payload.get("faces", [])][:2000],
+                                         str(payload.get("to", "")))
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            chapter.save(data)
+            cast.prune(chapter, crew)
+            cast.save_cast(chapter, crew)
+        return {**cast_detail(id), "moved_to": target}
+
+    @app.put("/api/cast/name")
+    def cast_name(id: str = Query(...), payload: dict = Body(...)):
+        chapter = chapter_of(id)
+        with cast_lock(chapter):
+            crew = cast.load_cast(chapter)
+            try:
+                cast.rename(crew, str(payload.get("char", "")), payload.get("name", ""))
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            cast.save_cast(chapter, crew)
+        return cast_detail(id)
+
+    @app.post("/api/cast/speakers")
+    def cast_speakers(id: str = Query(...), payload: dict = Body(...)):
+        chapter = chapter_of(id)
+        with lock_for(id):
+            data = chapter.load()
+            changed = cast.set_speakers(data, list(payload.get("choices", []))[:5000])
+            chapter.save(data)
+        return {**cast_detail(id), "changed": changed}
+
+    @app.get("/api/face")
+    def face_image(id: str = Query(...), f: str = Query(..., pattern=r"^([\w .-]+/)?f\d{4}$")):
+        chapter = chapter_of(id)
+        if "/" in f:  # visage d'un autre épisode de la série (couverture d'un personnage)
+            other, f = f.split("/")
+            folder = (cast.series_dir(chapter) / other).resolve()
+            if not folder.is_relative_to(inbox) or not is_chapter_dir(folder):
+                raise HTTPException(404, "Visage introuvable")
+            chapter = Chapter(folder)
+        path = cast.faces_dir(chapter) / f"{f}.jpg"
+        if not path.is_file():
+            raise HTTPException(404, "Visage introuvable")
+        return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "max-age=600"})
+
+    @app.get("/api/crop")
+    def frame_region(id: str = Query(...), frame: str = Query(...), y: int = Query(0, ge=0), h: int = Query(..., gt=0)):
+        """Un morceau de case (la bulle et les visages autour), pour l'écran Personnages."""
+        chapter, analysis, meta, data = prepared(id)
+        match = next((f for f in data["frames"] if f["file"] == frame), None)
+        if not match:
+            raise HTTPException(404, "Frame introuvable")
+        cx, cy, cw, ch = match["crop"]
+        img = tiles.region(chapter, meta, analysis, cx, cy + y, cw, min(h, ch - y))
+        if img is None:
+            raise HTTPException(404, "Aperçu impossible")
+        ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        return Response(buf.tobytes(), media_type="image/jpeg", headers={"Cache-Control": "max-age=600"})
 
     # ---------- Vidéo ----------
 

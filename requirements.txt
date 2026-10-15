@@ -4,6 +4,8 @@ urllib3
 opencv-python
 numpy
 pytesseract
+pyspellchecker
+onnxruntime
 Pillow
 edge-tts
 moviepy>=2.0.0

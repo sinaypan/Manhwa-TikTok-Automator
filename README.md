@@ -70,6 +70,23 @@ Les lignes en pointillés et les badges orange (case très haute) sont les endro
 vérifier ; « Tout est bon » les valide d'un coup. **Créer la vidéo** lance frames →
 texte → voix → rendu en arrière-plan, et la vidéo s'affiche dans le Studio à la fin.
 
+#### Onglet Personnages
+
+Une fois la vidéo créée, l'onglet **Personnages** cherche tout seul les visages dans les
+frames et les range par personnage (≈ 20 s pour un chapitre, sur le processeur). Les
+modèles (≈ 90 Mo) sont téléchargés au premier usage dans `.cache/models/`.
+
+| Geste | Effet |
+|---|---|
+| Écrire dans le champ d'un groupe | Nommer le personnage (pour toute la série) |
+| Clic sur des visages, puis sur un personnage dans la barre du bas | Les ranger (ou « Nouveau personnage », « Pas un visage ») |
+| Clic sur le nombre d'un groupe | Sélectionner tous ses visages (pour fusionner deux groupes) |
+| Clic sur une tête dans l'image d'une réplique, ou sur sa pastille | Dire qui parle |
+| « Valider les N propositions » | Accepter d'un coup le personnage proposé (en pointillés) |
+
+Le personnage proposé est celui dont le visage est le plus proche de la bulle ; sans
+visage dans la case, celui des cases voisines.
+
 ### 3. Ou tout en ligne de commande
 
 ```bash
@@ -120,18 +137,19 @@ Pour comparer les moteurs sur un chapitre, mets une référence lue à la main d
 ## Dossier d'un chapitre
 
 ```
+inbox/<série>/characters.json   personnages de la série (noms)
 inbox/<série>/chapter-012/
   pages/          images source (ou directement à la racine du chapitre)
   frames/         frames 9:16
   audio/          une voix par réplique
-  .studio/        cache du Studio (profil du chapitre, vignettes)
+  .studio/        cache du Studio (profil du chapitre, vignettes, visages)
   project.json    état de chaque étape (coupes, crops, textes…)
   video.mp4       résultat
 ```
 
 ## Configuration
 
-Tout se règle dans [config.toml](config.toml) : voix et vitesse (`[tts]`), fond des
+Tout se règle dans [config.toml](config.toml) : voix (`[tts]`), rythme de la vidéo (`[render] speed`, 1,25 par défaut), fond des
 frames (`[slicer]`), durée des frames sans texte (`[render]`), sites du scraper…
 
 ## Tests

@@ -115,3 +115,16 @@ def test_tall_art_panel_keeps_the_blur_even_on_a_white_page():
     page = np.full((1400, 800, 3), 255, np.uint8)
     page[100:1300, 50:750] = np.random.default_rng(2).integers(0, 255, (1200, 700, 3), dtype=np.uint8)
     assert flat_page_color(page, 50, 100, 700, 1200) is None
+
+
+def test_speed_makes_the_voice_faster_and_changes_the_audio_key():
+    from manhwa.tts import voice_rate
+
+    cfg = load_config()
+    cfg["tts"]["rate"], cfg["render"]["speed"] = "+0%", 1.0
+    key = audio_key("Hello there", cfg)
+    assert voice_rate(cfg) == "+0%"
+    cfg["render"]["speed"] = 1.25
+    assert voice_rate(cfg) == "+25%" and audio_key("Hello there", cfg) != key
+    cfg["tts"]["rate"] = "+10%"
+    assert voice_rate(cfg) == "+38%"

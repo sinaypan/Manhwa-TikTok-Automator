@@ -106,3 +106,16 @@ def preview(chapter, meta, analysis, y0, y1, x0=None, x1=None, size=(270, 480), 
     if crop.shape[0] < FLAT_RATIO * (cx1 - cx0):  # même règle que flat_page_color
         around = page_color(block, cx0, top, cx1 - cx0, crop.shape[0], band=max(2, round(8 * scale)))
     return letterbox(crop[:, cx0:cx1], size[0], size[1], bg_mode, 21, around=around)
+
+
+def region(chapter, meta, analysis, x, y, w, h, out_w=360):
+    """Un rectangle du strip (lignes et colonnes du strip), en petite image pour l'écran Personnages."""
+    block, scale = _block(chapter, meta, analysis, max(0, y), min(analysis["height"], y + h))
+    if block is None:
+        return None
+    x0, x1 = max(0, round(x * scale)), min(block.shape[1], round((x + w) * scale))
+    part = block[:, x0:x1]
+    if part.size == 0:
+        return None
+    out_h = max(1, round(part.shape[0] * out_w / part.shape[1]))
+    return cv2.resize(part, (out_w, out_h), interpolation=cv2.INTER_AREA)

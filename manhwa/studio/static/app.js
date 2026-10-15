@@ -1,5 +1,5 @@
 'use strict';
-// Manhwa Studio : bibliothèque (séries → épisodes) et écran Découpe.
+// Manhwa Studio : bibliothèque (séries → épisodes), écrans Découpe et Personnages.
 
 const STRIP_W = 380; // largeur d'affichage du strip, comme #strip dans app.css
 const STEP_NAMES = ['Pages', 'Découpe', 'Texte', 'Voix', 'Vidéo'];
@@ -8,6 +8,11 @@ const JOB_STEPS = [
   ['ocr', 'Lecture du texte'],
   ['tts', 'Voix'],
   ['render', 'Rendu vidéo'],
+];
+const FACE_STEPS = [['faces', 'Recherche des visages']];
+const SCREENS = [
+  ['cut', 'Découpe'],
+  ['cast', 'Personnages'],
 ];
 const TALL_DOUBT = 2; // une case de plus de 2 écrans cache sans doute une coupe
 
@@ -20,6 +25,9 @@ const ICONS = {
   down: 'M12 5v14M19 12l-7 7-7-7',
   scissors: 'M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12',
   inbox: 'M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z',
+  users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+  plus: 'M12 5v14M5 12h14',
+  x: 'M18 6 6 18M6 6l12 12',
 };
 
 /* ---------- Outils ---------- */
@@ -85,6 +93,12 @@ const state = {
   undo: [],
   drag: null,
   doubt: -1,
+  screen: 'cut', // 'cut' (Découpe) ou 'cast' (Personnages)
+  cast: null, // détail renvoyé par /api/cast
+  sel: new Set(), // visages sélectionnés (à ranger)
+  lineFilter: 'todo', // répliques : 'todo' (à valider) ou 'all'
+  pendingKeys: new Set(), // répliques « à valider » à l'ouverture (restent affichées une fois validées)
+  autoAnalyzed: new Set(), // chapitres dont on a déjà lancé la recherche de visages tout seul
 };
 
 const isRunning = (job) => job && (job.status === 'queued' || job.status === 'running');
@@ -117,13 +131,15 @@ function renderLibrary() {
 
 function jobProgressIndex(job) {
   // étape du travail en cours → case de la barre (frames = découpe, ocr = texte…)
+  if (job.kind === 'faces') return -1; // la recherche des visages ne fait pas partie des 5 étapes
   return JOB_STEPS.findIndex(([step]) => step === job.step) + 1;
 }
 
 function episodeRow(c) {
   const p = c.progress;
   const running = isRunning(c.job);
-  const runningAt = running ? Math.max(1, jobProgressIndex(c.job)) : -1;
+  const at = running ? jobProgressIndex(c.job) : -1;
+  const runningAt = at < 0 ? -1 : Math.max(1, at);
   let status;
   if (running) status = el('span', { class: 'spinner' });
   else if (c.job && c.job.status === 'error') status = el('span', { class: 'state', text: 'Erreur' });
@@ -161,16 +177,28 @@ function renderHome() {
 
 /* ---------- Chapitre : écran Découpe ---------- */
 
-async function openChapter(id) {
+function setHash() {
+  history.replaceState(null, '', `#${enc(state.current)}${state.screen === 'cast' ? '/personnages' : ''}`);
+}
+
+function parseHash() {
+  // « #Série%2Fchapter-001 » ou « #Série%2Fchapter-001/personnages »
+  const [raw, screen] = location.hash.slice(1).split('/');
+  return { id: decodeURIComponent(raw || ''), screen: screen === 'personnages' ? 'cast' : 'cut' };
+}
+
+async function openChapter(id, screen = 'cut') {
   state.current = id;
-  history.replaceState(null, '', `#${enc(id)}`);
+  state.screen = screen;
+  setHash();
   renderLibrary();
   $('#view').replaceChildren(el('div', { class: 'skeleton' }), el('p', { class: 'loading-label', text: 'Analyse du chapitre… les cases se découpent.' }));
   try {
     const ch = await api(`/api/chapter?id=${enc(id)}`);
     if (state.current !== id) return;
     loadChapter(ch);
-    renderChapter(true);
+    if (state.screen === 'cast') openCast();
+    else renderChapter(true);
     $('main').scrollTop = 0;
   } catch (e) {
     $('#view').replaceChildren(el('div', { class: 'notice error' }, icon('alert'), el('p', { text: `Impossible d’ouvrir ce chapitre : ${e.message}` })));
@@ -236,18 +264,55 @@ function renderChapter(intro = false) {
   if (intro) setTimeout(() => $('#strip')?.classList.remove('intro'), 2500);
 }
 
+function screenTabs() {
+  return el(
+    'div',
+    { class: 'tabs', role: 'tablist' },
+    SCREENS.map(([key, label]) => el('button', { type: 'button', role: 'tab', 'aria-selected': String(state.screen === key), class: state.screen === key ? 'on' : '', onclick: () => switchScreen(key) }, label)),
+  );
+}
+
+function switchScreen(screen) {
+  if (screen === state.screen || !state.chapter) return;
+  state.screen = screen;
+  setHash();
+  $('#hint').hidden = true;
+  if (screen === 'cast') openCast();
+  else renderChapter(false);
+  $('main').scrollTop = 0;
+}
+
 function renderHead() {
   const ch = state.chapter;
-  const n = doubts().length;
+  const head = $('#head');
+  if (!head) return;
   const job = findEpisode(ch.id)?.job || ch.job;
   const running = isRunning(job);
-  $('#head').replaceChildren(
+  const title = el('h2', { text: `${ch.series} · ${ch.name.replace('chapter-', 'Épisode ')}` });
+  if (state.screen === 'cast') {
+    const c = state.cast;
+    const named = c ? c.characters.filter((x) => x.faces.length).length : 0;
+    const done = c ? c.lines.filter((l) => l.speaker).length : 0;
+    head.replaceChildren(
+      el('div', { class: 'titles' }, title, el('p', { text: c ? `${plural(named, 'personnage', 'personnages')} · ${done} / ${plural(c.lines.length, 'réplique validée', 'répliques validées')}` : 'Personnages' })),
+      screenTabs(),
+      el(
+        'div',
+        { class: 'actions' },
+        el('button', { type: 'button', class: 'pill', title: 'Chercher à nouveau les visages (garde ce que tu as rangé)', disabled: running || !c?.frames, onclick: () => analyzeFaces(true) }, running ? el('span', { class: 'spinner' }) : icon('reset'), 'Revoir les visages'),
+      ),
+    );
+    return;
+  }
+  const n = doubts().length;
+  head.replaceChildren(
     el(
       'div',
       { class: 'titles' },
-      el('h2', { text: `${ch.series} · ${ch.name.replace('chapter-', 'Épisode ')}` }),
+      title,
       el('p', { text: `${plural(state.panels.length, 'case', 'cases')} · ${plural(state.cuts.length, 'coupe', 'coupes')} · ${state.undo.length || ch.edited ? 'découpe retouchée' : 'découpe automatique'}` }),
     ),
+    screenTabs(),
     el(
       'div',
       { class: 'actions' },
@@ -419,11 +484,12 @@ function counted(job) {
 }
 
 function jobCard(job) {
-  const at = JOB_STEPS.findIndex(([step]) => step === job.step);
-  const title = job.status === 'error' ? 'Erreur' : job.status === 'queued' ? 'En attente…' : 'Création de la vidéo';
+  const steps = job.kind === 'faces' ? FACE_STEPS : JOB_STEPS;
+  const at = steps.findIndex(([step]) => step === job.step);
+  const title = job.status === 'error' ? 'Erreur' : job.status === 'queued' ? 'En attente…' : job.kind === 'faces' ? 'Recherche des personnages' : 'Création de la vidéo';
   const detail =
     job.status === 'running' && at >= 0
-      ? `Étape ${at + 1}/${JOB_STEPS.length} · ${job.label}${counted(job)}${job.progress != null ? ` · ${Math.round(job.progress * 100)} %` : ''}${remaining(job)}`
+      ? `Étape ${at + 1}/${steps.length} · ${job.label}${counted(job)}${job.progress != null ? ` · ${Math.round(job.progress * 100)} %` : ''}${remaining(job)}`
       : '';
   return el(
     'div',
@@ -435,7 +501,7 @@ function jobCard(job) {
     el(
       'div',
       { class: 'job-steps' },
-      JOB_STEPS.map(([, label], i) => {
+      steps.map(([, label], i) => {
         const done = at > i;
         const on = at === i && job.status === 'running';
         return el('div', { class: done ? 'done' : on ? 'on' : '' }, done ? icon('check') : on ? el('span', { class: 'spinner' }) : el('span', { class: 'dot' }), label);
@@ -723,6 +789,390 @@ async function makeVideo() {
   }
 }
 
+/* ---------- Chapitre : écran Personnages ---------- */
+
+const castJob = () => findEpisode(state.current)?.job || state.cast?.job || state.chapter?.job;
+const faceSrc = (f) => `/api/face?id=${enc(state.chapter.id)}&f=${enc(f)}`;
+
+function charLabel(cid) {
+  if (cid === state.cast?.narrator) return 'Narrateur';
+  const list = state.cast?.characters || [];
+  const i = list.findIndex((c) => c.id === cid);
+  if (i < 0) return '?';
+  return list[i].name || `Perso ${i + 1}`;
+}
+
+function avatar(cid, size = '') {
+  if (cid === state.cast.narrator) return el('span', { class: `avatar narrator ${size}` }, icon('sparkles'));
+  const c = state.cast.characters.find((x) => x.id === cid);
+  return c?.cover ? el('img', { class: `avatar ${size}`, src: faceSrc(c.cover), alt: '' }) : el('span', { class: `avatar ${size}` }, icon('users'));
+}
+
+async function openCast() {
+  const id = state.chapter.id;
+  state.sel = new Set();
+  state.cast = null;
+  $('#view').replaceChildren(el('div', { class: 'head', id: 'head' }), el('div', { id: 'cast' }, el('div', { class: 'skeleton short' })), el('div', { id: 'tray', class: 'tray', hidden: true }));
+  renderHead();
+  try {
+    const c = await api(`/api/cast?id=${enc(id)}`);
+    if (state.chapter?.id !== id || state.screen !== 'cast') return;
+    setCast(c, true);
+  } catch (e) {
+    $('#cast').replaceChildren(el('div', { class: 'notice error' }, icon('alert'), el('p', { text: `Impossible d’ouvrir les personnages : ${e.message}` })));
+  }
+}
+
+function setCast(c, fresh = false) {
+  state.cast = c;
+  if (fresh) state.pendingKeys = new Set(c.lines.filter((l) => !l.speaker).map((l) => l.key));
+  // première visite : la recherche des visages se lance toute seule (aucun clic à faire)
+  const id = state.chapter.id;
+  if (c.status !== 'ready' && c.frames && !isRunning(castJob()) && !state.autoAnalyzed.has(id)) {
+    state.autoAnalyzed.add(id);
+    analyzeFaces();
+    return;
+  }
+  renderCast();
+}
+
+async function analyzeFaces(force = false) {
+  // force : chercher à nouveau même si la découpe n'a pas changé (ce qui est rangé sert de modèle)
+  const id = state.chapter.id;
+  try {
+    const job = await api(`/api/cast/analyze?id=${enc(id)}${force ? '&force=1' : ''}`, { method: 'POST' });
+    const ep = findEpisode(id);
+    if (ep) ep.job = job;
+    state.chapter.job = job;
+    if (state.cast) state.cast.job = job;
+    renderLibrary();
+    renderCast();
+    schedulePoll(500);
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+function renderCast() {
+  const box = $('#cast');
+  if (!box || !state.cast) return;
+  const c = state.cast;
+  const job = castJob();
+  renderHead();
+  const parts = [];
+  if (job?.kind === 'faces' && (isRunning(job) || job.status === 'error')) parts.push(jobCard(job));
+  else if (isRunning(job)) parts.push(el('div', { class: 'notice' }, el('span', { class: 'spinner' }), el('p', { text: 'La vidéo est en cours de création : les personnages se mettront à jour après.' })));
+  if (!c.frames) {
+    parts.push(el('div', { class: 'notice' }, icon('alert'), el('p', { text: 'Crée d’abord la vidéo depuis l’onglet Découpe : les visages se cherchent dans ses frames.' })));
+  } else if (c.status === 'stale' && !isRunning(job)) {
+    parts.push(el('div', { class: 'notice' }, icon('alert'), el('p', {}, 'La découpe a changé depuis. ', el('button', { type: 'button', class: 'link', onclick: () => analyzeFaces() }, 'Chercher les visages à nouveau'), ' (ce que tu as rangé est gardé).')));
+  }
+  if (c.status !== 'missing') parts.push(charsSection(), linesSection());
+  box.replaceChildren(...parts);
+  renderTray();
+}
+
+/* Personnages : un groupe de visages par personnage, nommé une fois pour toute la série */
+
+function charsSection() {
+  const c = state.cast;
+  const here = c.characters.map((ch, i) => ({ ...ch, i })).filter((ch) => ch.faces.length).sort((a, b) => b.faces.length - a.faces.length);
+  const elsewhere = c.characters.filter((ch) => !ch.faces.length);
+  const cards = here.map(charCard);
+  if (c.unsorted.length) cards.push(looseCard(c.unsorted));
+  return el(
+    'section',
+    { class: 'cast-block' },
+    el('div', { class: 'block-head' }, el('h3', { text: 'Personnages' }), el('p', { class: 'muted', text: 'Donne un nom à chaque groupe. Un visage mal rangé ? Clique dessus, puis sur le bon personnage dans la barre du bas.' })),
+    el('div', { class: 'cast-grid' }, cards),
+    elsewhere.length ? el('p', { class: 'muted elsewhere', text: `Déjà vus dans la série : ${elsewhere.map((ch) => charLabel(ch.id)).join(', ')}.` }) : null,
+    c.rejected.length
+      ? el('details', { class: 'rejected' }, el('summary', { text: `${plural(c.rejected.length, 'forme écartée', 'formes écartées')} (pas des visages)` }), el('div', { class: 'faces' }, c.rejected.map(faceThumb)))
+      : null,
+  );
+}
+
+function charCard(ch) {
+  return el(
+    'div',
+    { class: 'card who', 'data-char': ch.id },
+    el(
+      'div',
+      { class: 'who-head' },
+      avatar(ch.id, 'big'),
+      el('input', {
+        class: 'name',
+        value: ch.name,
+        placeholder: `Perso ${ch.i + 1} · qui est-ce ?`,
+        'aria-label': 'Nom du personnage',
+        maxlength: 40,
+        onchange: (e) => renameChar(ch.id, e.target.value),
+        onkeydown: (e) => e.key === 'Enter' && e.target.blur(),
+      }),
+      el('button', { type: 'button', class: 'count', title: 'Sélectionner tous ses visages', onclick: () => selectFaces(ch.faces) }, String(ch.faces.length)),
+    ),
+    el('div', { class: 'faces' }, ch.faces.map(faceThumb)),
+  );
+}
+
+function looseCard(faces) {
+  return el(
+    'div',
+    { class: 'card who loose' },
+    el(
+      'div',
+      { class: 'who-head' },
+      el('span', { class: 'avatar big' }, icon('users')),
+      el('div', { class: 'name static' }, el('b', { text: 'Autres visages' }), el('span', { class: 'muted', text: 'Pas encore rangés' })),
+      el('button', { type: 'button', class: 'count', title: 'Tout sélectionner', onclick: () => selectFaces(faces) }, String(faces.length)),
+    ),
+    el('div', { class: 'faces' }, faces.map(faceThumb)),
+  );
+}
+
+function faceThumb(fid) {
+  return el('button', { type: 'button', class: `face${state.sel.has(fid) ? ' sel' : ''}`, 'data-face': fid, onclick: () => toggleFace(fid) }, el('img', { src: faceSrc(fid), alt: '', loading: 'lazy' }));
+}
+
+function paintSelection() {
+  document.querySelectorAll('.face').forEach((n) => n.classList.toggle('sel', state.sel.has(n.dataset.face)));
+  renderTray();
+}
+
+function toggleFace(fid) {
+  if (state.sel.has(fid)) state.sel.delete(fid);
+  else state.sel.add(fid);
+  paintSelection();
+}
+
+function selectFaces(faces) {
+  const all = faces.every((f) => state.sel.has(f));
+  for (const f of faces) {
+    if (all) state.sel.delete(f);
+    else state.sel.add(f);
+  }
+  paintSelection();
+}
+
+function renderTray() {
+  const tray = $('#tray');
+  if (!tray) return;
+  const n = state.sel.size;
+  tray.hidden = !n;
+  if (!n) return;
+  const c = state.cast;
+  tray.replaceChildren(
+    el('b', { text: `${plural(n, 'visage', 'visages')} → ranger dans` }),
+    el(
+      'div',
+      { class: 'tray-targets' },
+      c.characters.map((ch) => el('button', { type: 'button', class: 'chip-btn', onclick: () => moveFaces(ch.id) }, avatar(ch.id, 'small'), charLabel(ch.id))),
+      el('button', { type: 'button', class: 'chip-btn', onclick: () => moveFaces('new') }, icon('plus'), 'Nouveau personnage'),
+      c.unsorted.length || n ? el('button', { type: 'button', class: 'chip-btn', onclick: () => moveFaces('none') }, 'Autres visages') : null,
+      el('button', { type: 'button', class: 'chip-btn quiet', onclick: () => moveFaces('not_face') }, 'Pas un visage'),
+    ),
+    el('button', { type: 'button', class: 'pill', title: 'Annuler la sélection', 'aria-label': 'Annuler la sélection', onclick: () => { state.sel.clear(); paintSelection(); } }, icon('x')),
+  );
+}
+
+function faceOwner(fid) {
+  const c = state.cast;
+  if (c.rejected.includes(fid)) return 'not_face';
+  return c.characters.find((ch) => ch.faces.includes(fid))?.id || 'none';
+}
+
+async function moveFaces(to, quiet = false) {
+  const faces = [...state.sel];
+  const before = {};
+  for (const f of faces) (before[faceOwner(f)] ||= []).push(f);
+  const id = state.chapter.id;
+  try {
+    const res = await api(`/api/cast/move?id=${enc(id)}`, { method: 'POST', body: JSON.stringify({ faces, to }) });
+    if (state.chapter?.id !== id) return;
+    state.sel.clear();
+    setCast(res);
+    if (quiet) return;
+    const where = to === 'not_face' ? '« pas un visage »' : to === 'none' ? '« autres visages »' : charLabel(res.moved_to);
+    toast(`${plural(faces.length, 'visage rangé', 'visages rangés')} dans ${where}`, { label: 'Annuler', run: () => undoMove(before) });
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+async function undoMove(before) {
+  for (const [to, faces] of Object.entries(before)) {
+    state.sel = new Set(faces);
+    // un personnage sans nom vidé par le déplacement a été retiré : on le recrée
+    const gone = !['none', 'not_face'].includes(to) && !state.cast.characters.some((c) => c.id === to);
+    await moveFaces(gone ? 'new' : to, true);
+  }
+}
+
+async function renameChar(cid, name) {
+  try {
+    state.cast = await api(`/api/cast/name?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify({ char: cid, name }) });
+    // les champs restent tels quels (on écrit peut-être déjà le suivant) : seuls les libellés changent
+    $('#speak')?.replaceWith(linesSection());
+    renderTray();
+    renderHead();
+  } catch (e) {
+    toast(`Nom non enregistré : ${e.message}`);
+  }
+}
+
+/* Qui parle : chaque réplique, avec le personnage proposé (visage le plus proche de la bulle) */
+
+function linesSection() {
+  const c = state.cast;
+  const total = c.lines.length;
+  const done = c.lines.filter((l) => l.speaker).length;
+  const proposals = c.lines.filter((l) => !l.speaker && l.suggestion).length;
+  const shown = state.lineFilter === 'todo' ? c.lines.filter((l) => state.pendingKeys.has(l.key)) : c.lines;
+  const setFilter = (key) => {
+    state.lineFilter = key;
+    state.pendingKeys = new Set(c.lines.filter((l) => !l.speaker).map((l) => l.key));
+    $('#speak').replaceWith(linesSection());
+  };
+  const filter = el(
+    'div',
+    { class: 'tabs small' },
+    [
+      ['todo', `À valider · ${total - done}`],
+      ['all', `Toutes · ${total}`],
+    ].map(([key, label]) => el('button', { type: 'button', class: state.lineFilter === key ? 'on' : '', onclick: () => setFilter(key) }, label)),
+  );
+  let body;
+  if (!c.ocr_done) body = el('p', { class: 'muted', text: 'Le texte n’a pas encore été lu : crée d’abord la vidéo.' });
+  else if (!total) body = el('p', { class: 'muted', text: 'Aucune réplique dans ce chapitre.' });
+  else if (!shown.length) body = el('div', { class: 'notice' }, icon('check'), el('p', { text: 'Toutes les répliques ont leur personnage.' }));
+  else body = el('div', { class: 'lines' }, shown.map(lineRow));
+  return el(
+    'section',
+    { class: 'cast-block', id: 'speak' },
+    el(
+      'div',
+      { class: 'block-head row' },
+      el('div', { class: 'grow' }, el('h3', { text: 'Qui parle' }), el('p', { class: 'muted', text: 'Clique sur la bonne tête, sur l’image ou dessous. En pointillés : la proposition. Servira à donner une voix à chaque personnage.' })),
+      el('div', { class: 'actions' }, filter, proposals ? el('button', { type: 'button', class: 'pill accent', onclick: acceptProposals }, icon('check'), `Valider les ${proposals} propositions`) : null),
+    ),
+    el('div', { class: 'bar' }, el('span', { style: `width:${total ? (100 * done) / total : 0}%` })),
+    body,
+  );
+}
+
+function boxStyle(box, view) {
+  const [, vy, vw, vh] = view;
+  return `left:${(100 * box[0]) / vw}%;top:${(100 * (box[1] - vy)) / vh}%;width:${(100 * box[2]) / vw}%;height:${(100 * box[3]) / vh}%`;
+}
+
+function lineRow(l) {
+  const c = state.cast;
+  const [, vy, vw, vh] = l.view;
+  const options = [...l.candidates];
+  if (l.speaker && l.speaker !== c.narrator && !options.includes(l.speaker)) options.unshift(l.speaker);
+  const state_ = (cid) => (l.speaker === cid ? ' on' : !l.speaker && l.suggestion === cid ? ' proposed' : '');
+  const chip = (cid) => el('button', { type: 'button', class: `chip-btn${state_(cid)}`, onclick: () => setSpeaker(l, cid) }, avatar(cid, 'small'), charLabel(cid));
+  const others = c.characters.filter((ch) => !options.includes(ch.id));
+  return el(
+    'div',
+    { class: `line-row${l.speaker ? ' done' : ''}`, 'data-key': l.key },
+    el(
+      'div',
+      { class: 'shot', style: `aspect-ratio:${vw}/${vh}` },
+      el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(l.frame)}&y=${vy}&h=${vh}`, alt: '', loading: 'lazy' }),
+      el('span', { class: 'bubble-box', style: boxStyle(l.box, l.view) }),
+      l.faces.map((f) =>
+        el('button', { type: 'button', class: `face-box${state_(f.char)}`, style: boxStyle(f.box, l.view), title: `C’est ${charLabel(f.char)} qui parle`, onclick: () => setSpeaker(l, f.char) }, el('span', { text: charLabel(f.char) })),
+      ),
+    ),
+    el(
+      'div',
+      { class: 'line-body' },
+      el('p', { class: 'quote', text: `« ${l.text} »` }),
+      el(
+        'div',
+        { class: 'who-chips' },
+        options.map(chip),
+        chip(c.narrator),
+        others.length
+          ? el(
+              'select',
+              { class: 'chip-btn', 'aria-label': 'Un autre personnage', onchange: (e) => e.target.value && setSpeaker(l, e.target.value) },
+              el('option', { value: '', text: 'Autre…' }),
+              others.map((ch) => el('option', { value: ch.id, text: charLabel(ch.id) })),
+            )
+          : null,
+      ),
+    ),
+  );
+}
+
+async function sendSpeakers(choices) {
+  const id = state.chapter.id;
+  const res = await api(`/api/cast/speakers?id=${enc(id)}`, { method: 'POST', body: JSON.stringify({ choices }) });
+  if (state.chapter?.id === id) state.cast = res;
+  return res;
+}
+
+async function setSpeaker(l, cid) {
+  const before = l.speaker;
+  try {
+    await sendSpeakers([{ key: l.key, char: cid }]);
+    // seule la ligne et le compteur changent : pas de saut dans la liste
+    const fresh = state.cast.lines.find((x) => x.key === l.key);
+    if (fresh) document.querySelector(`.line-row[data-key="${CSS.escape(l.key)}"]`)?.replaceWith(lineRow(fresh));
+    refreshSpeakHead();
+    renderHead();
+    if (before !== cid && fresh) toast(`« ${l.text.slice(0, 32)}${l.text.length > 32 ? '…' : ''} » → ${cid ? charLabel(cid) : 'personne'}`, { label: 'Annuler', run: () => setSpeaker(fresh, before) });
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+function refreshSpeakHead() {
+  // compteur, barre et bouton « Valider les propositions » sans redessiner les répliques
+  const old = $('#speak');
+  if (!old) return;
+  const fresh = linesSection();
+  old.querySelector('.block-head').replaceWith(fresh.querySelector('.block-head'));
+  old.querySelector('.bar').replaceWith(fresh.querySelector('.bar'));
+}
+
+async function acceptProposals() {
+  const todo = state.cast.lines.filter((l) => !l.speaker && l.suggestion);
+  try {
+    await sendSpeakers(todo.map((l) => ({ key: l.key, char: l.suggestion })));
+    $('#speak').replaceWith(linesSection());
+    renderHead();
+    toast(plural(todo.length, 'réplique validée', 'répliques validées'), {
+      label: 'Annuler',
+      run: async () => {
+        await sendSpeakers(todo.map((l) => ({ key: l.key, char: null })));
+        $('#speak')?.replaceWith(linesSection());
+        renderHead();
+      },
+    });
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+async function onCastJob(before, after) {
+  // la recherche des visages avance, ou vient de finir
+  if (isRunning(after)) {
+    const card = $('#job-card');
+    if (card && after.kind === 'faces') card.replaceWith(jobCard(after));
+    else renderCast();
+    return;
+  }
+  if (isRunning(before)) {
+    try {
+      const c = await api(`/api/cast?id=${enc(state.chapter.id)}`);
+      if (state.screen === 'cast') setCast(c, true);
+    } catch {}
+  }
+}
+
 /* ---------- Mise à jour en direct ---------- */
 
 let pollTimer;
@@ -737,7 +1187,9 @@ async function poll() {
     state.library = await api('/api/library');
     renderLibrary();
     const after = findEpisode(state.current)?.job;
-    if (state.chapter && JSON.stringify(before) !== JSON.stringify(after)) {
+    if (state.chapter && state.screen === 'cast' && JSON.stringify(before) !== JSON.stringify(after)) {
+      await onCastJob(before, after);
+    } else if (state.chapter && JSON.stringify(before) !== JSON.stringify(after)) {
       renderHead();
       // pendant un travail on ne redessine que la carte d'avancement (l'aperçu reste en place)
       const card = $('#job-card');
@@ -753,15 +1205,16 @@ async function poll() {
 }
 
 document.addEventListener('keydown', (event) => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && state.chapter) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && state.chapter && state.screen === 'cut') {
     event.preventDefault();
     undo();
   }
 });
 
 window.addEventListener('hashchange', () => {
-  const id = decodeURIComponent(location.hash.slice(1));
-  if (id && id !== state.current && findEpisode(id)) openChapter(id);
+  const { id, screen } = parseHash();
+  if (id && id !== state.current && findEpisode(id)) openChapter(id, screen);
+  else if (id === state.current && screen !== state.screen) switchScreen(screen);
 });
 
 for (const slot of document.querySelectorAll('[data-icon]')) slot.replaceChildren(icon(slot.dataset.icon));
@@ -774,8 +1227,8 @@ for (const slot of document.querySelectorAll('[data-icon]')) slot.replaceChildre
     return;
   }
   renderLibrary();
-  const id = decodeURIComponent(location.hash.slice(1));
-  if (id && findEpisode(id)) openChapter(id);
+  const { id, screen } = parseHash();
+  if (id && findEpisode(id)) openChapter(id, screen);
   else renderHome();
   schedulePoll(10000);
 })();

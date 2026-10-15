@@ -105,3 +105,13 @@ def test_tiny_marks_and_lone_letters_are_not_read():
     assert kinds(to_bubbles([line("N I I", 503, 626, 278, 276, 0.09)], W)) == [("sfx", "N I I")]
     # une vraie réplique d'une lettre, lue avec certitude, reste lue
     assert spoken_text(to_bubbles([line("I...", 300, 200, 60, 45, 0.99)], W)) == "I..."
+
+
+def test_shouted_or_shaky_real_words_are_dialogue_not_sfx():
+    # lus en gros ou avec hésitation, mais ce sont de vrais mots : une réplique
+    assert kinds(to_bubbles([line("sO...", 177, 64, 187, 105, 0.795)], W)) == [("dialogue", "sO...")]
+    assert kinds(to_bubbles([line("SLEEP AROMA...!", 227, 122, 339, 171, 0.926)], W)) == [("dialogue", "SLEEP AROMA...!")]
+    assert kinds(to_bubbles([line("NO", 159, 124, 117, 110, 0.548)], W)) == [("dialogue", "NO")]
+    # des lettres au hasard dans un SFX coréen restent un SFX, même si elles forment un « mot »
+    assert kinds(to_bubbles([line("KA", 594, 742, 238, 249, 0.202)], W)) == [("sfx", "KA")]
+    assert kinds(to_bubbles([line("MAth", 25, 206, 293, 253, 0.495)], W)) == [("sfx", "MAth")]

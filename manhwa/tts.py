@@ -5,9 +5,16 @@ import os
 from manhwa.project import fingerprint
 
 
+def voice_rate(cfg):
+    """Vitesse edge-tts : le réglage `tts.rate` multiplié par `render.speed` (« +25% »…)."""
+    base = 1 + int(str(cfg["tts"]["rate"]).strip().rstrip("%") or 0) / 100
+    pct = round((base * float(cfg["render"].get("speed", 1.0)) - 1) * 100)
+    return f"{pct:+d}%"
+
+
 def audio_key(text, cfg):
     t = cfg["tts"]
-    return fingerprint(text, t["voice"], t["rate"], t["volume"])
+    return fingerprint(text, t["voice"], voice_rate(cfg), t["volume"])
 
 
 async def _synthesize(text, path, cfg):
@@ -15,7 +22,7 @@ async def _synthesize(text, path, cfg):
 
     t = cfg["tts"]
     tmp = path.with_suffix(".part")
-    await edge_tts.Communicate(text, t["voice"], rate=t["rate"], volume=t["volume"]).save(str(tmp))
+    await edge_tts.Communicate(text, t["voice"], rate=voice_rate(cfg), volume=t["volume"]).save(str(tmp))
     os.replace(tmp, path)  # jamais de fichier à moitié écrit pris pour un vrai
 
 

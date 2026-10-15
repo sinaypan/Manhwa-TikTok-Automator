@@ -30,6 +30,7 @@ volume = "+0%"
 concurrency = 4
 
 [render]
+speed = 1.25              # rythme de la vidéo : voix 25 % plus rapide, blancs raccourcis d'autant
 fps = 24
 padding_seconds = 0.2      # silence ajouté après chaque réplique
 silent_frame_seconds = 2.0 # durée d'une frame sans texte

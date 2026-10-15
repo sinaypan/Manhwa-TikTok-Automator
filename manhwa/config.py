@@ -24,7 +24,7 @@ DEFAULTS = {
         "volume": "+0%",
         "concurrency": 4,
     },
-    "render": {"fps": 24, "padding_seconds": 0.2, "silent_frame_seconds": 2.0},
+    "render": {"speed": 1.0, "fps": 24, "padding_seconds": 0.2, "silent_frame_seconds": 2.0},
     "scraper": {
         "headless": False,
         "workers": 5,

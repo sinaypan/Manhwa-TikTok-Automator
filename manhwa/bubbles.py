@@ -10,7 +10,7 @@ Sortie : [{"text", "kind", "conf", "box"}] dans l'ordre de lecture, où kind vau
     "watermark" / "credit" / "title" : filigrane du site, page de crédits, titre de chapitre.
 """
 
-BUBBLES_VERSION = 3  # à incrémenter quand le tri change : les bulles sont recalculées
+BUBBLES_VERSION = 4  # à incrémenter quand le tri change : les bulles sont recalculées
                      # depuis les lignes OCR gardées, sans relire le chapitre
 import re
 import statistics
@@ -24,6 +24,29 @@ SFX_WORDS = {
     "krr", "krk", "tsk", "grr", "argh", "snap", "tap", "clack", "click", "ring", "ding", "buzz",
     "zip", "zap", "crack", "crunch", "thump", "rumble", "shff", "fwoosh", "whack", "smack", "clang",
 }
+
+
+_FREQ = None
+
+
+def real_words(words):
+    """Les mots anglais courants de `words` (dictionnaire de pyspellchecker).
+
+    Courant = très fréquent (« SO », « NO », « YES »), ou d'au moins 5 lettres et connu
+    (« AROMA ») : les lettres lues au hasard dans un SFX coréen (« LA », « KA », « MATH »)
+    n'y passent pas.
+    """
+    global _FREQ
+    if _FREQ is None:
+        from spellchecker import SpellChecker
+
+        _FREQ = SpellChecker().word_frequency
+    out = []
+    for w in words:
+        base = w.lower().strip("'").split("'")[0]  # « YOU'RE » → « you »
+        if len(base) >= 2 and (_FREQ[base] >= 100_000 or (len(base) >= 5 and _FREQ[base] >= 1_000)):
+            out.append(w)
+    return out
 
 
 def clean(text):
@@ -156,6 +179,12 @@ def to_bubbles(lines, width, typical_height=None):
                 kind = "number"  # chiffre seul : numéro de page, de chapitre, chiffre du décor
             elif height < TINY_TEXT * width:
                 kind = "noise"  # minuscule (traits du dessin) : le dialogue fait 35 à 55 px de haut
+            elif words and len(words) <= 3 and all(w.lower().strip("'") in SFX_WORDS for w in words):
+                kind = "sfx"  # « BAM! », « CRASH »
+            elif (big or not low_conf) and words and sum(map(len, real_words(words))) >= 0.5 * letters:
+                # de vrais mots anglais (« SO... », « YOU'RE AWAK », « SLEEP AROMA...! ») : une
+                # réplique criée en gros ou mal lue, pas une onomatopée
+                kind = "dialogue"
             elif words and all(len(w.strip("'")) <= 1 for w in words) and not (bubble["conf"] or 0) >= 0.95:
                 # que des lettres isolées (« I i i 2 », « N I I ») sans lecture quasi certaine
                 kind = "sfx" if big else "noise"
@@ -163,11 +192,10 @@ def to_bubbles(lines, width, typical_height=None):
                 # 1 à 4 lettres lues au hasard : en très gros, c'est un SFX coréen stylisé ;
                 # en petit, une forme du dessin prise pour une lettre (bruit)
                 kind = "sfx" if big else "noise"
-            elif words and len(words) <= 3 and (
-                all(w.lower().strip("'") in SFX_WORDS for w in words)
+            elif words and len(words) <= 3 and big and (
                 # 1 à 3 mots en très gros ET lus avec hésitation ou lettres répétées (« KRAAAK ») ;
                 # une bulle écrite gros mais nette (« A WISE CHOICE. ») reste du dialogue
-                or big and ((bubble["conf"] is not None and bubble["conf"] < 0.9) or re.search(r"(.)\1\1", text))
+                (bubble["conf"] is not None and bubble["conf"] < 0.9) or re.search(r"(.)\1\1", text)
             ):
                 kind = "sfx"
             else:

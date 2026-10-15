@@ -887,3 +887,421 @@ main {
     transition: none !important;
   }
 }
+
+/* ---------- Onglets Découpe / Personnages ---------- */
+
+.tabs {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--field);
+}
+
+.tabs button {
+  padding: 6px 14px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tabs button.on {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.tabs.small button {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.link {
+  padding: 0;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- Écran Personnages ---------- */
+
+#cast {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.skeleton.short {
+  width: 100%;
+  height: 220px;
+}
+
+.cast-block {
+  display: grid;
+  gap: 12px;
+}
+
+.block-head h3 {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.block-head p {
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.block-head.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.block-head .grow {
+  flex: 1;
+  min-width: 260px;
+}
+
+.cast-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.who {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.who.loose {
+  border: 1px dashed var(--sep);
+  background: none;
+}
+
+.who-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.who-head .name {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+}
+
+.who-head input.name:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.who-head input.name:placeholder-shown {
+  font-weight: 500;
+}
+
+.who-head .name.static {
+  display: grid;
+  padding: 0;
+  background: none;
+  font-weight: 400;
+}
+
+.who-head .name.static span {
+  font-size: 11px;
+}
+
+.who-head .count {
+  min-width: 30px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.avatar svg {
+  width: 60%;
+  height: 60%;
+}
+
+.avatar.big {
+  width: 40px;
+  height: 40px;
+}
+
+.avatar.narrator {
+  background: var(--tint);
+  color: var(--accent);
+}
+
+.faces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.face {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  transition: transform 0.12s;
+}
+
+.face img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.face:hover {
+  transform: scale(1.06);
+}
+
+.face.sel {
+  outline: 3px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.face.sel::after {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  content: '';
+}
+
+.elsewhere {
+  font-size: 12px;
+}
+
+.rejected summary {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.rejected .faces {
+  margin-top: 8px;
+  opacity: 0.7;
+}
+
+/* Barre du bas : où ranger les visages sélectionnés */
+.tray {
+  position: sticky;
+  bottom: 16px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 10px 12px 10px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+}
+
+.tray > b {
+  flex: none;
+}
+
+.tray-targets {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chip-btn > svg {
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+}
+
+select.chip-btn {
+  padding: 5px 10px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chip-btn:hover {
+  border-color: var(--sep);
+}
+
+.chip-btn.quiet {
+  padding-left: 10px;
+  color: var(--muted);
+}
+
+.chip-btn.proposed {
+  border: 1px dashed var(--accent);
+  color: var(--accent);
+}
+
+.chip-btn.on {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Répliques */
+.lines {
+  display: grid;
+  gap: 10px;
+}
+
+.line-row {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--field);
+}
+
+.line-row.done {
+  background: color-mix(in srgb, var(--field) 55%, transparent);
+}
+
+.shot {
+  position: relative;
+  align-self: start;
+  width: 100%;
+  max-height: 400px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+
+.bubble-box,
+.face-box {
+  position: absolute;
+  border-radius: 8px;
+}
+
+.bubble-box {
+  border: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  pointer-events: none;
+}
+
+.face-box {
+  padding: 0;
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+/* le nom dans le haut du cadre : il reste visible même si le visage déborde de l'image */
+.face-box span {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.face-box:hover,
+.face-box.proposed {
+  border-color: var(--accent);
+  border-style: dashed;
+}
+
+.face-box.on {
+  border-color: var(--accent);
+  border-style: solid;
+}
+
+.face-box.on span,
+.face-box:hover span {
+  background: var(--accent);
+}
+
+.line-body {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.quote {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.who-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.who-chips .chip-btn {
+  background: var(--bg);
+}
+
+.who-chips .chip-btn.on {
+  background: var(--accent);
+}
+
+@media (max-width: 860px) {
+  .line-row {
+    grid-template-columns: 1fr;
+  }
+
+  .tray {
+    flex-wrap: wrap;
+  }
+}
