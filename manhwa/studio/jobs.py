@@ -5,9 +5,11 @@ import time
 import traceback
 
 STEP_LABELS = {"frames": "Frames", "ocr": "Lecture du texte", "tts": "Voix", "render": "Rendu vidéo",
-               "faces": "Recherche des visages"}
+               "faces": "Recherche des visages", "wiki": "Lecture du wiki", "wiki_images": "Images du wiki",
+               "wiki_faces": "Visages du wiki"}
 # ce que l'on compte à chaque étape (« 6 210 / 12 960 images »)
-STEP_UNITS = {"frames": "frames", "ocr": "frames lues", "tts": "voix", "render": "images", "faces": "frames"}
+STEP_UNITS = {"frames": "frames", "ocr": "frames lues", "tts": "voix", "render": "images", "faces": "frames", "wiki": "",
+              "wiki_images": "images", "wiki_faces": "images"}
 
 
 class Jobs:
@@ -45,7 +47,8 @@ class Jobs:
             self.state[chapter_id].update(changes)
 
     def _worker(self):
-        from manhwa.cast import run_faces
+        from manhwa.cast import run_faces, series_dir
+        from manhwa.ingest import wiki
         from manhwa.ocr import run_ocr
         from manhwa.panels import build_frames
         from manhwa.render import run_render
@@ -59,6 +62,12 @@ class Jobs:
                 ("render", lambda c, p: run_render(c, self.cfg, progress=p)),
             ],
             "faces": [("faces", lambda c, p: run_faces(c, self.cfg, progress=p))],
+            "wiki": [("wiki", lambda c, p: wiki.fetch(series_dir(c)))],
+            # une fenêtre de navigateur s'ouvre : la vérification Cloudflare s'y passe à la main
+            "wiki_images": [
+                ("wiki_images", lambda c, p: wiki.fetch_images(series_dir(c), progress=p)),
+                ("wiki_faces", lambda c, p: wiki.embed_wiki_faces(series_dir(c), progress=p)),
+            ],
         }
         while True:
             chapter_id, chapter, kind = self.queue.get()

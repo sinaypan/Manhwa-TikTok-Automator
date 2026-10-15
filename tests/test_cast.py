@@ -128,12 +128,14 @@ def test_studio_cast_screen_moves_names_and_speakers(client):
 
     c = api.get("/api/cast", params={"id": CID}).json()
     assert c["status"] == "ready" and c["unsorted"] == ["f0003"]
-    assert c["characters"] == [{"id": cid, "name": "", "cover": "chapter-001/f0001", "faces": ["f0001", "f0002"]}]
+    ch = c["characters"][0]
+    assert (ch["id"], ch["name"], ch["cover"], ch["faces"], ch["silent"]) == (cid, "", "chapter-001/f0001", ["f0001", "f0002"], False)
+    assert c["face_views"]["f0001"]["frame"] == c["lines"][0]["frame"]
     line = c["lines"][0]
     assert line["text"] == "YOU'RE BACK." and line["suggestion"] == cid
 
     # nommer : enregistré pour toute la série
-    c = api.put("/api/cast/name", params={"id": CID}, json={"char": cid, "name": "  Seo   Ha-eun "}).json()
+    c = api.put("/api/cast/character", params={"id": CID}, json={"char": cid, "name": "  Seo   Ha-eun "}).json()
     assert c["characters"][0]["name"] == "Seo Ha-eun"
     assert json.loads((chapter.root.parent / "characters.json").read_text(encoding="utf-8"))["characters"][0]["name"] == "Seo Ha-eun"
 
@@ -147,6 +149,12 @@ def test_studio_cast_screen_moves_names_and_speakers(client):
     c = api.post("/api/cast/move", params={"id": CID}, json={"faces": ["f0002"], "to": cid}).json()
     assert [ch["id"] for ch in c["characters"]] == [cid] and new != cid
     assert api.post("/api/cast/move", params={"id": CID}, json={"faces": ["f0001"], "to": "c99"}).status_code == 422
+
+    # « ne parle pas » : plus jamais proposé
+    c = api.put("/api/cast/character", params={"id": CID}, json={"char": cid, "silent": True}).json()
+    assert c["characters"][0]["silent"] and c["lines"][0]["suggestion"] is None
+    c = api.put("/api/cast/character", params={"id": CID}, json={"char": cid, "silent": False}).json()
+    assert c["lines"][0]["suggestion"] == cid
 
     # qui parle
     c = api.post("/api/cast/speakers", params={"id": CID}, json={"choices": [{"key": line["key"], "char": cid}]}).json()
@@ -181,3 +189,67 @@ def test_run_faces_end_to_end(client):
     c = api.get("/api/cast", params={"id": CID}).json()
     assert c["status"] == "ready"
     assert cast.run_faces(chapter, cfg) == 0  # déjà à jour
+
+
+WIKITEXT = "\n".join([
+    "{{Character",
+    "|image1=<gallery>",
+    "hero_later.jpg|Later",
+    "Hero.jpg|Early",
+    "</gallery>",
+    "|name=Jang Hero",
+    "|gender=Male",
+    "|hair_color=Blue <small>(Before)</small><br>Black <small>(After)</small>",
+    '|vital_status=<span class="spoilerblur">Dead</span>',
+    "|allies={{SpoilerHidden|Major Spoiler|[[Secret Friend]]<br>Other}}",
+    "|manhwa_debut=Chapter 1",
+    "}}",
+    "'''Hero''' is the main character.",
+    "",
+    "== Personality ==",
+    "Hero is '''calm''' and [[Cunning|cunning]].<ref>source</ref> <span class=\"spoilerblur\">He betrays everyone.</span>",
+    "",
+    "== Background ==",
+    "Long story.",
+])
+
+
+def test_wiki_page_is_read_without_spoilers():
+    from manhwa.ingest.wiki import candidates, hair_key, parse_character
+
+    c = parse_character("Hero", WIKITEXT)
+    assert (c["name"], c["gender"], c["debut"], c["hair_key"]) == ("Jang Hero", "Male", 1, "blue")
+    assert c["images"] == ["hero_later.jpg", "Hero.jpg"]
+    assert c["personality"] == "Hero is calm and cunning."
+    dump = json.dumps(c)
+    assert "Secret" not in dump and "betrays" not in dump and "Dead" not in dump
+    assert hair_key("Silver-white") == "white" and hair_key("") is None
+    assert candidates("Myst Might Mayhem") == ["https://myst-might-mayhem.fandom.com", "https://mystmightmayhem.fandom.com"]
+
+
+def test_wiki_names_are_proposed_by_hair_and_debut(tmp_path):
+    chapter = Chapter(tmp_path / "Série" / "chapter-002")
+    folder = cast.faces_dir(chapter)
+    folder.mkdir(parents=True)
+    blue = np.zeros((128, 128, 3), np.uint8)
+    blue[:] = (200, 60, 30)  # BGR : des cheveux bleus
+    white = np.full((128, 128, 3), 230, np.uint8)
+    faces = []
+    for i, (img, char) in enumerate([(blue, "c1"), (blue, "c1"), (white, "c2")], 1):
+        write_jpeg(folder / f"f{i:04d}.jpg", img, 95)
+        faces.append({"id": f"f{i:04d}", "frame": "frame_0001.jpg", "box": [0, 0, 10, 10], "char": char})
+    data = {"frames": [], "faces": {"key": "x", "list": faces}}
+    crew = {"characters": [{"id": "c1", "name": ""}, {"id": "c2", "name": ""}], "next": 3}
+    wiki = {"characters": [
+        {"id": "w1", "title": "Hero", "hair_key": "blue", "debut": 1},
+        {"id": "w2", "title": "Grandpa", "hair_key": "white", "debut": 2},
+        {"id": "w3", "title": "Villain", "hair_key": "blue", "debut": 40},   # apparaît plus tard : jamais proposé
+        {"id": "w4", "title": "Nobody", "hair_key": "blue", "debut": None},  # apparition inconnue, aucun visage
+    ]}
+    assert cast.wiki_suggestions(chapter, data, crew, wiki) == {"c1": ["w1"], "c2": ["w2"]}
+
+    cast.update_character(crew, "c1", {"wiki": "w1"}, wiki)
+    assert crew["characters"][0]["name"] == "Hero"
+    assert "c1" not in cast.wiki_suggestions(chapter, data, crew, wiki)
+    with pytest.raises(ValueError):
+        cast.update_character(crew, "c2", {"wiki": "w99"}, wiki)

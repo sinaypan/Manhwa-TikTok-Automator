@@ -9,7 +9,15 @@ const JOB_STEPS = [
   ['tts', 'Voix'],
   ['render', 'Rendu vidéo'],
 ];
-const FACE_STEPS = [['faces', 'Recherche des visages']];
+const KIND_STEPS = {
+  faces: [['faces', 'Recherche des visages']],
+  wiki: [['wiki', 'Lecture du wiki']],
+  wiki_images: [
+    ['wiki_images', 'Images du wiki'],
+    ['wiki_faces', 'Visages du wiki'],
+  ],
+};
+const KIND_TITLES = { faces: 'Recherche des personnages', wiki: 'Lecture du wiki', wiki_images: 'Images du wiki' };
 const SCREENS = [
   ['cut', 'Découpe'],
   ['cast', 'Personnages'],
@@ -131,7 +139,7 @@ function renderLibrary() {
 
 function jobProgressIndex(job) {
   // étape du travail en cours → case de la barre (frames = découpe, ocr = texte…)
-  if (job.kind === 'faces') return -1; // la recherche des visages ne fait pas partie des 5 étapes
+  if (KIND_STEPS[job.kind]) return -1; // personnages et wiki ne font pas partie des 5 étapes
   return JOB_STEPS.findIndex(([step]) => step === job.step) + 1;
 }
 
@@ -484,9 +492,9 @@ function counted(job) {
 }
 
 function jobCard(job) {
-  const steps = job.kind === 'faces' ? FACE_STEPS : JOB_STEPS;
+  const steps = KIND_STEPS[job.kind] || JOB_STEPS;
   const at = steps.findIndex(([step]) => step === job.step);
-  const title = job.status === 'error' ? 'Erreur' : job.status === 'queued' ? 'En attente…' : job.kind === 'faces' ? 'Recherche des personnages' : 'Création de la vidéo';
+  const title = job.status === 'error' ? 'Erreur' : job.status === 'queued' ? 'En attente…' : KIND_TITLES[job.kind] || 'Création de la vidéo';
   const detail =
     job.status === 'running' && at >= 0
       ? `Étape ${at + 1}/${steps.length} · ${job.label}${counted(job)}${job.progress != null ? ` · ${Math.round(job.progress * 100)} %` : ''}${remaining(job)}`
@@ -498,6 +506,9 @@ function jobCard(job) {
     detail ? el('p', { class: 'job-progress', text: detail }) : null,
     job.progress != null && job.status === 'running' ? el('div', { class: 'bar' }, el('span', { style: `width:${job.progress * 100}%` })) : null,
     job.error ? el('p', { class: 'muted', style: 'margin-top:6px', text: job.error }) : null,
+    job.step === 'wiki_images' && job.status === 'running'
+      ? el('p', { class: 'notice-inline' }, icon('alert'), 'Une fenêtre de navigateur s’est ouverte : si Cloudflare demande une vérification, passe-la dedans. La suite se fait toute seule.')
+      : null,
     el(
       'div',
       { class: 'job-steps' },
@@ -860,7 +871,7 @@ function renderCast() {
   const job = castJob();
   renderHead();
   const parts = [];
-  if (job?.kind === 'faces' && (isRunning(job) || job.status === 'error')) parts.push(jobCard(job));
+  if (KIND_STEPS[job?.kind] && (isRunning(job) || job.status === 'error')) parts.push(jobCard(job));
   else if (isRunning(job)) parts.push(el('div', { class: 'notice' }, el('span', { class: 'spinner' }), el('p', { text: 'La vidéo est en cours de création : les personnages se mettront à jour après.' })));
   if (!c.frames) {
     parts.push(el('div', { class: 'notice' }, icon('alert'), el('p', { text: 'Crée d’abord la vidéo depuis l’onglet Découpe : les visages se cherchent dans ses frames.' })));
@@ -876,15 +887,32 @@ function renderCast() {
 
 function charsSection() {
   const c = state.cast;
-  const here = c.characters.map((ch, i) => ({ ...ch, i })).filter((ch) => ch.faces.length).sort((a, b) => b.faces.length - a.faces.length);
+  const all = c.characters.map((ch, i) => ({ ...ch, i })).filter((ch) => ch.faces.length).sort((a, b) => b.faces.length - a.faces.length);
+  const here = all.filter((ch) => !ch.silent);
+  const silent = all.filter((ch) => ch.silent);
   const elsewhere = c.characters.filter((ch) => !ch.faces.length);
   const cards = here.map(charCard);
   if (c.unsorted.length) cards.push(looseCard(c.unsorted));
   return el(
     'section',
     { class: 'cast-block' },
-    el('div', { class: 'block-head' }, el('h3', { text: 'Personnages' }), el('p', { class: 'muted', text: 'Donne un nom à chaque groupe. Un visage mal rangé ? Clique dessus, puis sur le bon personnage dans la barre du bas.' })),
+    el(
+      'div',
+      { class: 'block-head row' },
+      el('div', { class: 'grow' }, el('h3', { text: 'Personnages' }), el('p', { class: 'muted', text: 'Donne un nom à chaque groupe (ou clique sur un nom du wiki). Un visage mal rangé ? Clique dessus, puis sur le bon personnage dans la barre du bas.' })),
+      wikiStatus(),
+    ),
+    el('datalist', { id: 'wiki-names' }, c.people.filter((w) => !w.later).map((w) => el('option', { value: w.title }))),
     el('div', { class: 'cast-grid' }, cards),
+    silent.length
+      ? el(
+          'div',
+          { class: 'silent-block' },
+          el('h4', { text: 'Ne parlent pas' }),
+          el('p', { class: 'muted', text: 'Jamais proposés pour une réplique. Clique sur « Parle » pour les remettre.' }),
+          el('div', { class: 'cast-grid' }, silent.map(charCard)),
+        )
+      : null,
     elsewhere.length ? el('p', { class: 'muted elsewhere', text: `Déjà vus dans la série : ${elsewhere.map((ch) => charLabel(ch.id)).join(', ')}.` }) : null,
     c.rejected.length
       ? el('details', { class: 'rejected' }, el('summary', { text: `${plural(c.rejected.length, 'forme écartée', 'formes écartées')} (pas des visages)` }), el('div', { class: 'faces' }, c.rejected.map(faceThumb)))
@@ -892,10 +920,12 @@ function charsSection() {
   );
 }
 
+const person = (wid) => state.cast.people.find((w) => w.id === wid);
+
 function charCard(ch) {
   return el(
     'div',
-    { class: 'card who', 'data-char': ch.id },
+    { class: `card who${ch.silent ? ' silent' : ''}`, 'data-char': ch.id },
     el(
       'div',
       { class: 'who-head' },
@@ -905,14 +935,89 @@ function charCard(ch) {
         value: ch.name,
         placeholder: `Perso ${ch.i + 1} · qui est-ce ?`,
         'aria-label': 'Nom du personnage',
+        list: 'wiki-names',
         maxlength: 40,
-        onchange: (e) => renameChar(ch.id, e.target.value),
+        onchange: (e) => {
+          // un nom choisi dans la liste du wiki lie aussi sa fiche
+          const page = state.cast.people.find((w) => w.title === e.target.value.trim());
+          updateChar(ch.id, page ? { name: page.title, wiki: page.id } : { name: e.target.value });
+        },
         onkeydown: (e) => e.key === 'Enter' && e.target.blur(),
       }),
       el('button', { type: 'button', class: 'count', title: 'Sélectionner tous ses visages', onclick: () => selectFaces(ch.faces) }, String(ch.faces.length)),
     ),
+    wikiLine(ch),
     el('div', { class: 'faces' }, ch.faces.map(faceThumb)),
+    el(
+      'div',
+      { class: 'who-foot' },
+      el('button', { type: 'button', class: 'link quiet', title: ch.silent ? 'Il peut être proposé pour les répliques' : 'Il ne sera plus proposé pour les répliques', onclick: () => updateChar(ch.id, { silent: !ch.silent }) }, ch.silent ? 'Parle' : 'Ne parle pas'),
+    ),
   );
+}
+
+function wikiLine(ch) {
+  // fiche liée : genre, cheveux, apparition, caractère ; sinon : les noms proposés
+  const page = ch.wiki && person(ch.wiki);
+  if (page) {
+    const facts = [page.gender, page.hair && `cheveux : ${page.hair.split(',')[0]}`, page.debut && `dès le ch. ${page.debut}`].filter(Boolean).join(' · ');
+    return el(
+      'div',
+      { class: 'wiki-card' },
+      page.image ? el('img', { class: 'wiki-portrait', src: `/api/wiki_image?id=${enc(state.chapter.id)}&f=${enc(page.image)}`, alt: '' }) : null,
+      el(
+        'div',
+        { class: 'wiki-text' },
+        el('p', {}, el('b', { text: page.title }), page.name !== page.title ? el('span', { class: 'muted', text: ` (${page.name})` }) : null),
+        facts ? el('p', { class: 'muted', text: facts }) : null,
+        page.personality ? el('details', {}, el('summary', { text: 'Caractère (wiki)' }), el('p', { text: page.personality })) : null,
+        el('p', {}, el('a', { href: page.url, target: '_blank', rel: 'noopener noreferrer', class: 'link' }, 'Voir sur le wiki'), ' · ', el('button', { type: 'button', class: 'link quiet', onclick: () => updateChar(ch.id, { wiki: null }) }, 'Pas lui')),
+      ),
+    );
+  }
+  if (!ch.suggest.length) return null;
+  return el(
+    'div',
+    { class: 'who-chips wiki-suggest' },
+    el('span', { class: 'muted', text: 'Wiki :' }),
+    ch.suggest.map((wid, k) => {
+      const w = person(wid);
+      return w ? el('button', { type: 'button', class: `chip-btn plain${k === 0 ? ' proposed' : ''}`, title: k === 0 ? 'Le plus probable (cheveux, apparition, visage)' : 'Autre possibilité', onclick: () => updateChar(ch.id, { name: w.title, wiki: w.id }) }, w.title) : null;
+    }),
+  );
+}
+
+function wikiStatus() {
+  const c = state.cast;
+  const busy = isRunning(castJob());
+  if (!c.wiki) {
+    return el('div', { class: 'actions' }, el('button', { type: 'button', class: 'pill', disabled: busy, onclick: () => readWiki(false) }, icon('users'), 'Noms depuis le wiki'));
+  }
+  const missing = c.wiki.listed && !c.wiki.images; // images pas encore téléchargées (une image introuvable ne compte pas)
+  return el(
+    'div',
+    { class: 'actions wiki-status' },
+    el('span', { class: 'muted', text: `${c.wiki.sitename} · ${plural(c.people.length, 'personnage', 'personnages')} · lu le ${c.wiki.fetched}` }),
+    missing
+      ? el('button', { type: 'button', class: 'pill', disabled: busy, title: 'Ouvre une fenêtre de navigateur : la vérification Cloudflare se passe à la main, une fois', onclick: () => readWiki(true) }, 'Images du wiki')
+      : null,
+    el('button', { type: 'button', class: 'pill', disabled: busy, title: 'Relire le wiki', onclick: () => readWiki(false) }, icon('reset')),
+  );
+}
+
+async function readWiki(images) {
+  const id = state.chapter.id;
+  try {
+    const job = await api(`/api/cast/wiki?id=${enc(id)}${images ? '&images=1' : ''}`, { method: 'POST' });
+    const ep = findEpisode(id);
+    if (ep) ep.job = job;
+    state.chapter.job = job;
+    state.cast.job = job;
+    renderCast();
+    schedulePoll(500);
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
 }
 
 function looseCard(faces) {
@@ -931,7 +1036,50 @@ function looseCard(faces) {
 }
 
 function faceThumb(fid) {
-  return el('button', { type: 'button', class: `face${state.sel.has(fid) ? ' sel' : ''}`, 'data-face': fid, onclick: () => toggleFace(fid) }, el('img', { src: faceSrc(fid), alt: '', loading: 'lazy' }));
+  return el(
+    'button',
+    { type: 'button', class: `face${state.sel.has(fid) ? ' sel' : ''}`, 'data-face': fid, onclick: () => toggleFace(fid), onmouseenter: (e) => peekFace(fid, e.currentTarget), onmouseleave: hidePeek },
+    el('img', { src: faceSrc(fid), alt: '', loading: 'lazy' }),
+  );
+}
+
+/* Aperçu agrandi au survol : la case d'où vient un visage, ou une réplique en grand */
+
+let peekTimer;
+function showPeek(anchor, frame, view, boxes, width) {
+  clearTimeout(peekTimer);
+  peekTimer = setTimeout(() => {
+    const [, vy, vw, vh] = view;
+    let box = $('#peek');
+    if (!box) document.body.append((box = el('div', { id: 'peek' })));
+    const shot = el(
+      'div',
+      { class: 'shot', style: `aspect-ratio:${vw}/${vh}` },
+      el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(frame)}&y=${vy}&h=${vh}&w=${width >= 400 ? 600 : 360}`, alt: '' }),
+      boxes.map(([cls, b]) => el('span', { class: cls, style: boxStyle(b, view) })),
+    );
+    box.replaceChildren(shot);
+    // à côté de l'élément survolé, sans sortir de l'écran
+    const r = anchor.getBoundingClientRect();
+    const h = Math.min(window.innerHeight - 24, (width * vh) / vw);
+    const w = (h * vw) / vh;
+    box.style.width = `${w}px`;
+    const left = r.right + 12 + w < window.innerWidth ? r.right + 12 : Math.max(12, r.left - 12 - w);
+    box.style.left = `${left}px`;
+    box.style.top = `${Math.max(12, Math.min(window.innerHeight - h - 12, r.top + r.height / 2 - h / 2))}px`;
+    box.hidden = false;
+  }, 180);
+}
+
+function hidePeek() {
+  clearTimeout(peekTimer);
+  const box = $('#peek');
+  if (box) box.hidden = true;
+}
+
+function peekFace(fid, anchor) {
+  const v = state.cast?.face_views?.[fid];
+  if (v) showPeek(anchor, v.frame, v.view, [['face-box on', v.box]], 340);
 }
 
 function paintSelection() {
@@ -1008,15 +1156,21 @@ async function undoMove(before) {
   }
 }
 
-async function renameChar(cid, name) {
+async function updateChar(cid, changes) {
   try {
-    state.cast = await api(`/api/cast/name?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify({ char: cid, name }) });
-    // les champs restent tels quels (on écrit peut-être déjà le suivant) : seuls les libellés changent
-    $('#speak')?.replaceWith(linesSection());
-    renderTray();
-    renderHead();
+    state.cast = await api(`/api/cast/character?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify({ char: cid, ...changes }) });
+    if ('name' in changes && Object.keys(changes).length === 1) {
+      // nom tapé à la main : les champs restent tels quels (on écrit peut-être déjà le suivant)
+      $('#speak')?.replaceWith(linesSection());
+      renderTray();
+      renderHead();
+    } else {
+      const top = $('main').scrollTop;
+      renderCast();
+      $('main').scrollTop = top;
+    }
   } catch (e) {
-    toast(`Nom non enregistré : ${e.message}`);
+    toast(`Non enregistré : ${e.message}`);
   }
 }
 
@@ -1078,7 +1232,13 @@ function lineRow(l) {
     { class: `line-row${l.speaker ? ' done' : ''}`, 'data-key': l.key },
     el(
       'div',
-      { class: 'shot', style: `aspect-ratio:${vw}/${vh}` },
+      {
+        class: 'shot',
+        style: `aspect-ratio:${vw}/${vh}`,
+        // survol : la même image en grand (les cadres des visages restent cliquables)
+        onmouseenter: (e) => showPeek(e.currentTarget, l.frame, l.view, [['bubble-box', l.box], ...l.faces.map((f) => ['face-box', f.box])], 480),
+        onmouseleave: hidePeek,
+      },
       el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(l.frame)}&y=${vy}&h=${vh}`, alt: '', loading: 'lazy' }),
       el('span', { class: 'bubble-box', style: boxStyle(l.box, l.view) }),
       l.faces.map((f) =>
@@ -1161,7 +1321,7 @@ async function onCastJob(before, after) {
   // la recherche des visages avance, ou vient de finir
   if (isRunning(after)) {
     const card = $('#job-card');
-    if (card && after.kind === 'faces') card.replaceWith(jobCard(after));
+    if (card && KIND_STEPS[after.kind]) card.replaceWith(jobCard(after));
     else renderCast();
     return;
   }
@@ -1216,6 +1376,8 @@ window.addEventListener('hashchange', () => {
   if (id && id !== state.current && findEpisode(id)) openChapter(id, screen);
   else if (id === state.current && screen !== state.screen) switchScreen(screen);
 });
+
+$('main').addEventListener('scroll', hidePeek, { passive: true });
 
 for (const slot of document.querySelectorAll('[data-icon]')) slot.replaceChildren(icon(slot.dataset.icon));
 

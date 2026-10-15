@@ -78,7 +78,10 @@ modèles (≈ 90 Mo) sont téléchargés au premier usage dans `.cache/models/`.
 
 | Geste | Effet |
 |---|---|
-| Écrire dans le champ d'un groupe | Nommer le personnage (pour toute la série) |
+| Écrire dans le champ d'un groupe | Nommer le personnage (pour toute la série) ; la liste propose les noms du wiki |
+| Clic sur un nom « Wiki : … » | Nommer d'après le wiki (genre, cheveux, caractère affichés) |
+| « Ne parle pas » | Ranger le personnage à part : il n'est plus jamais proposé pour une réplique |
+| Survol d'un visage ou d'une image | La case d'où il vient, en grand |
 | Clic sur des visages, puis sur un personnage dans la barre du bas | Les ranger (ou « Nouveau personnage », « Pas un visage ») |
 | Clic sur le nombre d'un groupe | Sélectionner tous ses visages (pour fusionner deux groupes) |
 | Clic sur une tête dans l'image d'une réplique, ou sur sa pastille | Dire qui parle |
@@ -86,6 +89,14 @@ modèles (≈ 90 Mo) sont téléchargés au premier usage dans `.cache/models/`.
 
 Le personnage proposé est celui dont le visage est le plus proche de la bulle ; sans
 visage dans la case, celui des cases voisines.
+
+**Wiki** : « Noms depuis le wiki » lit le wiki Fandom de la série (trouvé d'après son
+nom) : noms, genre, cheveux, chapitre d'apparition et caractère, sans les passages
+marqués spoiler. Un nom est proposé à un groupe d'après la couleur des cheveux et le
+chapitre d'apparition (jamais un personnage qui n'apparaît que plus tard). « Images du
+wiki » ouvre une fenêtre de navigateur : si Cloudflare demande une vérification, tu la
+passes à la main une fois, puis les images se téléchargent et leurs visages affinent
+les propositions. Tout est rangé dans `inbox/<série>/.wiki/`.
 
 ### 3. Ou tout en ligne de commande
 

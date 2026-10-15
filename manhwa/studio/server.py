@@ -12,6 +12,8 @@ from fastapi.staticfiles import StaticFiles
 
 from manhwa import cast
 from manhwa.config import inbox_dir
+from manhwa.images import read_image
+from manhwa.ingest import wiki
 from manhwa.panels import ensure_cuts, find_gutters, load_analysis, panels_from_cuts
 from manhwa.progress import chapter_progress
 from manhwa.project import Chapter, find_chapters, is_chapter_dir
@@ -184,10 +186,25 @@ def create_app(cfg):
             status = "stale"  # la découpe a changé depuis
         else:
             status = "ready"
-        characters = [{"id": c["id"], "name": c["name"], "cover": c.get("cover"),
+        series = cast.series_dir(chapter)
+        wiki_data = wiki.load_wiki(series)
+        suggest = cast.wiki_suggestions(chapter, data, crew, wiki_data, wiki.wiki_vectors(series)) if status != "missing" else {}
+        characters = [{"id": c["id"], "name": c["name"], "cover": c.get("cover"), "wiki": c.get("wiki"),
+                       "silent": bool(c.get("silent")), "suggest": suggest.get(c["id"], []),
                        "faces": [f["id"] for f in faces if f.get("char") == c["id"] and not f.get("not_face")]}
                       for c in crew["characters"]]
+        number = cast.chapter_number(chapter)
+        people = []
+        for w in (wiki_data or {}).get("characters", []):
+            people.append({k: w.get(k) for k in ("id", "title", "name", "gender", "hair", "debut", "personality")}
+                          | {"url": wiki_data["base"] + w["url"], "image": (w.get("files") or [None])[0],
+                             "later": bool(w.get("debut") and number and w["debut"] > number)})
         return {
+            "wiki": {"sitename": wiki_data["sitename"], "fetched": wiki_data["fetched"],
+                     "images": sum(len(w.get("files", [])) for w in wiki_data["characters"]),
+                     "listed": sum(len(w.get("images", [])) for w in wiki_data["characters"])} if wiki_data else None,
+            "people": people,
+            "face_views": cast.face_views(data),
             "status": status,
             "frames": len(data["frames"]),
             "ocr_done": any("bubbles" in f for f in data["frames"]),
@@ -231,17 +248,36 @@ def create_app(cfg):
             cast.save_cast(chapter, crew)
         return {**cast_detail(id), "moved_to": target}
 
-    @app.put("/api/cast/name")
-    def cast_name(id: str = Query(...), payload: dict = Body(...)):
+    @app.put("/api/cast/character")
+    def cast_character(id: str = Query(...), payload: dict = Body(...)):
+        """Nom, fiche du wiki liée, « ne parle pas »."""
         chapter = chapter_of(id)
+        changes = {k: payload[k] for k in ("name", "wiki", "silent") if k in payload}
         with cast_lock(chapter):
             crew = cast.load_cast(chapter)
             try:
-                cast.rename(crew, str(payload.get("char", "")), payload.get("name", ""))
+                cast.update_character(crew, str(payload.get("char", "")), changes, wiki.load_wiki(cast.series_dir(chapter)))
             except ValueError as e:
                 raise HTTPException(422, str(e))
             cast.save_cast(chapter, crew)
         return cast_detail(id)
+
+    @app.post("/api/cast/wiki")
+    def cast_wiki(id: str = Query(...), images: bool = Query(False)):
+        """Lire le wiki de la série ; images=1 : télécharger aussi ses images (vérification à la main)."""
+        chapter = chapter_of(id)
+        return jobs.submit(id, chapter, kind="wiki_images" if images else "wiki")
+
+    @app.get("/api/wiki_image")
+    def wiki_image(id: str = Query(...), f: str = Query(..., pattern=r"^w\d+-\d+\.img$")):
+        chapter = chapter_of(id)
+        img = read_image(wiki.wiki_dir(cast.series_dir(chapter)) / f)
+        if img is None:
+            raise HTTPException(404, "Image introuvable")
+        h, w = img.shape[:2]
+        img = cv2.resize(img, (240, max(1, round(h * 240 / w))), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        return Response(buf.tobytes(), media_type="image/jpeg", headers={"Cache-Control": "max-age=3600"})
 
     @app.post("/api/cast/speakers")
     def cast_speakers(id: str = Query(...), payload: dict = Body(...)):
@@ -267,14 +303,15 @@ def create_app(cfg):
         return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "max-age=600"})
 
     @app.get("/api/crop")
-    def frame_region(id: str = Query(...), frame: str = Query(...), y: int = Query(0, ge=0), h: int = Query(..., gt=0)):
+    def frame_region(id: str = Query(...), frame: str = Query(...), y: int = Query(0, ge=0), h: int = Query(..., gt=0),
+                     w: int = Query(360, ge=120, le=720)):
         """Un morceau de case (la bulle et les visages autour), pour l'écran Personnages."""
         chapter, analysis, meta, data = prepared(id)
         match = next((f for f in data["frames"] if f["file"] == frame), None)
         if not match:
             raise HTTPException(404, "Frame introuvable")
         cx, cy, cw, ch = match["crop"]
-        img = tiles.region(chapter, meta, analysis, cx, cy + y, cw, min(h, ch - y))
+        img = tiles.region(chapter, meta, analysis, cx, cy + y, cw, min(h, ch - y), out_w=w)
         if img is None:
             raise HTTPException(404, "Aperçu impossible")
         ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])

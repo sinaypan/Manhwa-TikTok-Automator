@@ -209,11 +209,130 @@ def move_faces(chapter, data, cast, face_ids, target):
     return target
 
 
-def rename(cast, cid, name):
+def update_character(cast, cid, changes, wiki=None):
+    """Nom, fiche du wiki liée (id « w12 » ou None) et « ne parle pas » d'un personnage."""
     c = character(cast, cid)
     if not c:
         raise ValueError("Personnage inconnu")
-    c["name"] = " ".join(str(name).split())[:40]
+    if "wiki" in changes:
+        wid = changes["wiki"] or None
+        page = next((w for w in (wiki or {}).get("characters", []) if w["id"] == wid), None)
+        if wid and not page:
+            raise ValueError("Fiche du wiki inconnue")
+        c["wiki"] = wid
+        if page and "name" not in changes:
+            c["name"] = page["title"]
+    if "name" in changes:
+        c["name"] = " ".join(str(changes["name"] or "").split())[:40]
+    if "silent" in changes:
+        c["silent"] = bool(changes["silent"])
+
+
+# ---------- Noms proposés depuis le wiki ----------
+
+FACE_SIM = 0.8         # ressemblance (DINOv2) avec un visage du wiki à partir de laquelle elle compte
+STRONG_FACE_SIM = 0.85 # assez pour proposer un personnage dont le wiki ne dit pas quand il apparaît
+HAIR_COLORS = ("black", "white", "gray", "red", "brown", "orange", "yellow", "green", "cyan", "blue", "purple", "pink")
+
+
+def hair_colors(images):
+    """Part de chaque couleur dans le haut des vignettes (les cheveux) : {"blue": 0.49, …}."""
+    import cv2
+
+    total = np.zeros(len(HAIR_COLORS))
+    for img in images:
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+        top = img[round(0.03 * h):round(0.34 * h), round(0.19 * w):round(0.81 * w)]  # sans les bords (le fond)
+        hsv = cv2.cvtColor(top, cv2.COLOR_BGR2HSV).reshape(-1, 3).astype(int)
+        hue, sat, val = hsv[:, 0] * 2, hsv[:, 1], hsv[:, 2]
+        label = np.select(
+            [val < 55, (sat < 45) & (val > 170), sat < 45, (hue < 15) | (hue >= 340), (hue < 40) & (val < 160),
+             hue < 40, (hue < 70) & (val > 150), hue < 70, hue < 170, hue < 200, hue < 260, hue < 300],
+            [0, 1, 2, 3, 4, 5, 6, 4, 7, 8, 9, 10], 11)
+        total += np.bincount(label, minlength=len(HAIR_COLORS)) / max(1, len(label))
+    n = sum(1 for img in images if img is not None)
+    return {c: round(float(v / n), 3) for c, v in zip(HAIR_COLORS, total)} if n else {}
+
+
+def chapter_number(chapter):
+    import re
+
+    m = re.search(r"\d+", chapter.root.name)
+    return int(m.group()) if m else None
+
+
+def wiki_suggestions(chapter, data, cast, wiki, vectors=None):
+    """Pour chaque personnage sans fiche : les fiches du wiki les plus probables, la meilleure en tête.
+
+    Score = apparu dans ce chapitre ou avant (le wiki le dit) + même couleur de cheveux
+    + ressemblance avec les visages des images du wiki (si elles ont été téléchargées).
+    Les personnages qui n'apparaissent que plus tard ne sont jamais proposés (spoiler).
+    Chaque fiche ne va qu'à un groupe : on attribue d'abord les paires les plus sûres.
+    """
+    from manhwa.images import read_image
+
+    if not wiki:
+        return {}
+    number = chapter_number(chapter)
+    linked = {c.get("wiki") for c in cast["characters"] if c.get("wiki")}
+    pool = [w for w in wiki["characters"] if w["id"] not in linked and not (w["debut"] and number and w["debut"] > number)]
+    owners, wvecs = vectors or ([], None)
+    chapter_vecs = _load_vectors(chapter) if owners else {}
+    by_char = defaultdict(list)
+    for f in chapter_faces(data):
+        if f.get("char") and not f.get("not_face"):
+            by_char[f["char"]].append(f["id"])
+    folder = faces_dir(chapter)
+    scored = defaultdict(dict)
+    for c in cast["characters"]:
+        faces = by_char.get(c["id"])
+        if c.get("wiki") or not faces:
+            continue
+        hair = hair_colors([read_image(folder / f"{fid}.jpg") for fid in faces[:30]])
+        sims = {}
+        vs = [chapter_vecs[fid] for fid in faces if fid in chapter_vecs]
+        if vs and wvecs is not None and len(wvecs):
+            center = np.mean(vs, axis=0)
+            center /= np.linalg.norm(center) + 1e-9
+            for owner, sim in zip(owners, wvecs @ center):
+                sims[owner] = max(sims.get(owner, -1.0), float(sim))
+        for w in pool:
+            sim = sims.get(w["id"], 0.0)
+            # mesuré sur le ch. 1 : le bon personnage ressemble à ≈ 0,89, un autre à 0,76 au plus
+            score = 3 * hair.get(w.get("hair_key"), 0) + 6 * max(0.0, sim - FACE_SIM)
+            if w["debut"]:
+                score += 1  # le wiki confirme qu'il est déjà apparu
+            elif sim < STRONG_FACE_SIM:
+                continue  # apparition inconnue et visage peu ressemblant : pas de nom au hasard
+            if score >= 1.6:  # au moins 20 % de cheveux de la bonne couleur, ou un visage très ressemblant
+                scored[c["id"]][w["id"]] = round(score, 2)
+    best, taken = {}, set()
+    for score, cid, wid in sorted(((s, cid, wid) for cid, d in scored.items() for wid, s in d.items()), reverse=True):
+        if cid not in best and wid not in taken:
+            best[cid] = wid
+            taken.add(wid)
+    out = {}
+    for cid, d in scored.items():
+        rest = [wid for wid in sorted(d, key=lambda k: -d[k]) if wid != best.get(cid)]
+        out[cid] = ([best[cid]] if cid in best else []) + rest[:2]
+    return out
+
+
+def face_views(data):
+    """Pour l'aperçu au survol : où chaque visage se trouve dans sa case. {id: {frame, box, view}}."""
+    frames = {f["file"]: f for f in data["frames"]}
+    out = {}
+    for face in chapter_faces(data):
+        frame = frames.get(face["frame"])
+        if not frame:
+            continue
+        _, _, w, h = frame["crop"]
+        height = min(h, round(1.3 * w))
+        y0 = max(0, min(round(_center(face["box"])[1] - height / 2), h - height))
+        out[face["id"]] = {"frame": face["frame"], "box": face["box"], "view": [0, y0, w, height]}
+    return out
 
 
 # ---------- Qui parle ----------
@@ -245,14 +364,16 @@ def lines(data, cast):
     """Les répliques du chapitre, chacune avec son personnage validé et les plus probables.
 
     Probable = un visage proche de la bulle dans la même case, sinon un personnage des
-    cases voisines, sinon un personnage fréquent du chapitre.
+    cases voisines, sinon un personnage fréquent du chapitre. Les personnages rangés dans
+    « Ne parlent pas » ne sont jamais proposés.
     """
     ids = {c["id"] for c in cast["characters"]}
+    talkers = {c["id"] for c in cast["characters"] if not c.get("silent")}
     faces = [f for f in chapter_faces(data) if f.get("char") in ids and not f.get("not_face")]
     by_frame = defaultdict(list)
     for f in faces:
         by_frame[f["frame"]].append(f)
-    counts = Counter(f["char"] for f in faces)
+    counts = Counter(f["char"] for f in faces if f["char"] in talkers)
     total = sum(counts.values()) or 1
     frames = data["frames"]
     out = []
@@ -265,14 +386,14 @@ def lines(data, cast):
             scores = defaultdict(float)
             bx, by = _center(bubble["box"])
             width = frame["crop"][2] or 1
-            for f in here:
+            for f in (f for f in here if f["char"] in talkers):
                 fx, fy = _center(f["box"])
                 d = math.hypot(fx - bx, fy - by) / width
                 scores[f["char"]] = max(scores[f["char"]], 1 / (1 + 2 * d))
             for offset, weight in ((-1, 0.35), (1, 0.25), (-2, 0.2)):
                 k = i + offset
                 if 0 <= k < len(frames):
-                    for f in by_frame.get(frames[k]["file"], []):
+                    for f in (f for f in by_frame.get(frames[k]["file"], []) if f["char"] in talkers):
                         scores[f["char"]] = max(scores[f["char"]], weight)
             for cid, n in counts.items():
                 scores[cid] = max(scores[cid], 0.1 * n / total)
