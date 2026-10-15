@@ -1,16 +1,21 @@
 """Travaux en arrière-plan : frames → OCR → voix → vidéo, un chapitre à la fois."""
 import queue
 import threading
+import time
 import traceback
 
 STEP_LABELS = {"frames": "Frames", "ocr": "Lecture du texte", "tts": "Voix", "render": "Rendu vidéo"}
+# ce que l'on compte à chaque étape (« 6 210 / 12 960 images »)
+STEP_UNITS = {"frames": "frames", "ocr": "frames lues", "tts": "voix", "render": "images"}
 
 
 class Jobs:
     def __init__(self, cfg):
         self.cfg = cfg
         self.lock = threading.Lock()
-        self.state = {}  # id du chapitre → {"step", "label", "status", "error"}
+        # id du chapitre → {"step", "label", "status", "error", "progress" (0→1 ou None),
+        #                   "done", "total", "unit", "step_started"}
+        self.state = {}
         self.queue = queue.Queue()
         threading.Thread(target=self._worker, daemon=True).start()
 
@@ -28,7 +33,9 @@ class Jobs:
             current = self.state.get(chapter_id)
             if current and current["status"] in ("queued", "running"):
                 return dict(current)
-            self.state[chapter_id] = {"step": None, "label": "En attente", "status": "queued", "error": None}
+            self.state[chapter_id] = {"step": None, "label": "En attente", "status": "queued", "error": None,
+                                      "progress": None, "done": None, "total": None, "unit": None,
+                                      "step_started": None}
         self.queue.put((chapter_id, chapter))
         return self.get(chapter_id)
 
@@ -43,18 +50,20 @@ class Jobs:
         from manhwa.tts import run_tts
 
         steps = [
-            ("frames", lambda c: build_frames(c, self.cfg)),
-            ("ocr", lambda c: run_ocr(c, self.cfg)),
-            ("tts", lambda c: run_tts(c, self.cfg)),
-            ("render", lambda c: run_render(c, self.cfg)),
+            ("frames", lambda c, p: build_frames(c, self.cfg, progress=p)),
+            ("ocr", lambda c, p: run_ocr(c, self.cfg, progress=p)),
+            ("tts", lambda c, p: run_tts(c, self.cfg, progress=p)),
+            ("render", lambda c, p: run_render(c, self.cfg, progress=p)),
         ]
         while True:
             chapter_id, chapter = self.queue.get()
             try:
                 for step, run in steps:
-                    self._set(chapter_id, step=step, label=STEP_LABELS[step], status="running")
-                    run(chapter)
-                self._set(chapter_id, step=None, label="Terminé", status="done")
+                    self._set(chapter_id, step=step, label=STEP_LABELS[step], status="running", progress=None,
+                              done=None, total=None, unit=STEP_UNITS[step], step_started=time.time())
+                    run(chapter, lambda done, total, cid=chapter_id: self._set(
+                        cid, progress=round(done / total, 4) if total else None, done=done, total=total))
+                self._set(chapter_id, step=None, label="Terminé", status="done", progress=None, done=None, total=None)
             except Exception as e:
                 traceback.print_exc()
                 self._set(chapter_id, status="error", label="Erreur", error=str(e))

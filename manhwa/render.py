@@ -28,7 +28,21 @@ def _load_audio(path):
         return None
 
 
-def run_render(chapter, cfg, force=False):
+def _progress_logger(progress):
+    """Logger moviepy qui remonte (images écrites, total d'images de la vidéo)."""
+    import proglog
+
+    class Logger(proglog.ProgressBarLogger):
+        def bars_callback(self, bar, attr, value, old_value=None):
+            if bar == "frame_index" and attr == "index":
+                total = self.bars[bar].get("total") or 0
+                if total:
+                    progress(min(value, total), total)
+
+    return Logger()
+
+
+def run_render(chapter, cfg, force=False, progress=None):
     data = chapter.load()
     if not data["frames"]:
         print("  Aucune frame à assembler.")
@@ -63,9 +77,12 @@ def run_render(chapter, cfg, force=False):
     tmp = chapter.root / "video.part.mp4"
     print(f"  Rendu de {len(clips)} frames...")
     try:
-        final = concatenate_videoclips(clips, method="compose")
+        # toutes les frames font la même taille (1080×1920) : "chain" suffit et est ~18× plus
+        # rapide que "compose" (mesuré : 213 contre 12 images/s)
+        final = concatenate_videoclips(clips, method="chain")
         final.write_videofile(str(tmp), fps=r["fps"], codec="libx264", audio_codec="aac",
-                              preset="ultrafast", threads=4)
+                              preset="ultrafast", threads=4,
+                              logger=_progress_logger(progress) if progress else "bar")
         final.close()
     finally:
         for c in clips + audios:

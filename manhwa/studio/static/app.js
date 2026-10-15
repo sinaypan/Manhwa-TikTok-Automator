@@ -9,7 +9,7 @@ const JOB_STEPS = [
   ['tts', 'Voix'],
   ['render', 'Rendu vidéo'],
 ];
-const TALL_DOUBT = 2.5; // une case de plus de 2,5 écrans cache sans doute une coupe
+const TALL_DOUBT = 2; // une case de plus de 2 écrans cache sans doute une coupe
 
 const ICONS = {
   sparkles: 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z',
@@ -182,30 +182,48 @@ function loadChapter(ch) {
   state.cuts = ch.cuts.map((c) => ({ ...c }));
   state.panels = ch.panels;
   state.reviewed = !!ch.reviewed;
+  state.checked = ch.checked || []; // cases hautes déjà vérifiées (début de la case)
   state.undo = [];
   state.doubt = -1;
 }
 
+const isChecked = (p) => state.checked.some((y) => Math.abs(y - p.y0) < 40);
+
 function doubts() {
   const list = state.cuts.filter((c) => !c.sure).map((c) => ({ y: c.y, kind: 'cut' }));
   if (!state.reviewed) {
-    for (const p of state.panels) if (p.screens > TALL_DOUBT) list.push({ y: Math.round((p.y0 + p.y1) / 2), kind: 'tall' });
+    for (const p of state.panels) {
+      if (p.screens > TALL_DOUBT && !isChecked(p)) list.push({ y: Math.round((p.y0 + p.y1) / 2), kind: 'tall', panel: p });
+    }
   }
   return list.sort((a, b) => a.y - b.y);
 }
 
+const snapshot = () => ({ cuts: state.cuts, reviewed: state.reviewed, checked: state.checked });
+
 function renderChapter(intro = false) {
   const ch = state.chapter;
   const H = ch.height * scale();
-  const strip = el('div', { id: 'strip', class: intro ? 'intro' : '', style: `height:${H}px`, onclick: onStripClick, onpointerdown: onPointerDown });
+  const strip = el('div', {
+    id: 'strip',
+    class: intro ? 'intro' : '',
+    style: `height:${H}px`,
+    onclick: onStripClick,
+    onpointerdown: onPointerDown,
+    onpointermove: onStripHover,
+    onpointerleave: () => ($('#hint').hidden = true),
+  });
   const rows = ch.tiles.rows;
   for (let i = 0; i < ch.tiles.count; i++) {
     const h = Math.min(rows, ch.height - i * rows) * scale();
     strip.append(el('img', { src: `/api/tile?id=${enc(ch.id)}&i=${i}`, loading: 'lazy', decoding: 'async', alt: '', style: `top:${i * rows * scale()}px;height:${h}px` }));
   }
-  const notice = ch.manual_frames
-    ? el('div', { class: 'notice' }, icon('alert'), el('p', { text: `Ce chapitre a ${ch.manual_frames} frames faites à la main. « Créer la vidéo » les remplacera par cette découpe.` }))
-    : null;
+  let notice = null;
+  if (ch.manual_frames) {
+    notice = el('div', { class: 'notice' }, icon('alert'), el('p', { text: `Ce chapitre a ${ch.manual_frames} frames faites à la main. « Créer la vidéo » les remplacera par cette découpe.` }));
+  } else if (ch.stale_frames) {
+    notice = el('div', { class: 'notice' }, icon('alert'), el('p', { text: 'La découpe a changé depuis la dernière vidéo. « Créer la vidéo » la mettra à jour.' }));
+  }
   $('#view').replaceChildren(
     ...[el('div', { class: 'head', id: 'head' }), notice, el('div', { class: 'workspace' }, el('div', {}, strip), el('div', { class: 'side', id: 'side' }))].filter(Boolean),
   );
@@ -232,6 +250,7 @@ function renderHead() {
       { class: 'actions' },
       n ? el('button', { type: 'button', class: 'pill warn', onclick: nextDoubt }, icon('down'), `${n} à vérifier`) : null,
       el('button', { type: 'button', class: 'pill', title: 'Revenir à la découpe automatique', onclick: resetCuts }, icon('reset'), 'Auto'),
+      el('button', { type: 'button', class: 'pill', title: 'Comment ça marche', 'aria-label': 'Comment ça marche', onclick: () => { state.introOpen = true; renderSide(); $('#side').scrollTop = 0; } }, '?'),
       el('button', { type: 'button', class: 'pill accent', disabled: running, onclick: makeVideo }, running ? el('span', { class: 'spinner light' }) : icon('play'), running ? 'En cours…' : 'Créer la vidéo'),
     ),
   );
@@ -248,7 +267,7 @@ function renderOverlays() {
       el(
         'div',
         { class: 'panel', style: `top:${p.y0 * s}px;height:${(p.y1 - p.y0) * s}px`, onmouseenter: () => showPreview(i) },
-        el('span', { class: `badge${p.screens > TALL_DOUBT && !state.reviewed ? ' tall' : ''}`, text: tall ? `${i + 1} · ${fmt(p.screens)} écrans` : `${i + 1}` }),
+        el('span', { class: `badge${p.screens > TALL_DOUBT && !state.reviewed && !isChecked(p) ? ' tall' : ''}`, text: tall ? `${i + 1} · ${fmt(p.screens)} écrans` : `${i + 1}` }),
       ),
     );
   });
@@ -266,6 +285,17 @@ function renderSide() {
   const cards = [];
 
   if (job && (isRunning(job) || job.status === 'error')) cards.push(jobCard(job));
+  // la vidéo finie passe en premier : c'est ce qu'on vient chercher après « Créer la vidéo »
+  else if (progress.done === progress.total) {
+    cards.push(
+      el(
+        'div',
+        { class: 'card' },
+        el('h3', { text: 'Vidéo prête' }),
+        el('div', { class: 'frame video' }, el('video', { src: `/api/video?id=${enc(ch.id)}&v=${Date.now()}`, controls: true, preload: 'metadata' })),
+      ),
+    );
+  }
 
   cards.push(
     el(
@@ -278,47 +308,115 @@ function renderSide() {
   );
 
   if (n) {
+    const list = doubts();
+    const current = state.doubt >= 0 ? list[Math.min(state.doubt, n - 1)] : null;
+    const what = !current
+      ? 'Lignes en pointillés : coupe incertaine. Badge orange : case très haute, il manque peut-être une coupe.'
+      : current.kind === 'cut'
+        ? `Endroit ${Math.min(state.doubt, n - 1) + 1}/${n} : coupe incertaine. Garde-la, ou clique dessus pour la supprimer.`
+        : `Endroit ${Math.min(state.doubt, n - 1) + 1}/${n} : case très haute (${fmt(current.panel.screens)} écrans). Ajoute une coupe si ce sont plusieurs cases.`;
     cards.push(
       el(
         'div',
-        { class: 'card' },
+        { class: 'card', id: 'doubts-card' },
         el('h3', { text: `${plural(n, 'endroit', 'endroits')} à vérifier` }),
-        el('p', { class: 'muted', text: 'Lignes en pointillés : coupe incertaine. Badge orange : case très haute, il manque peut-être une coupe.' }),
-        el('div', { class: 'actions', style: 'margin-top:10px' }, el('button', { type: 'button', class: 'pill', onclick: nextDoubt }, icon('down'), 'Suivant'), el('button', { type: 'button', class: 'pill', onclick: acceptAll }, icon('check'), 'Tout est bon')),
+        el('p', { class: 'muted', text: what }),
+        el(
+          'div',
+          { class: 'actions', style: 'margin-top:10px;flex-wrap:wrap' },
+          current
+            ? el('button', { type: 'button', class: 'pill accent', onclick: keepDoubt }, icon('check'), 'C’est bon')
+            : el('button', { type: 'button', class: 'pill accent', onclick: nextDoubt }, icon('down'), 'Voir le premier'),
+          current ? el('button', { type: 'button', class: 'pill', onclick: nextDoubt }, icon('down'), 'Suivant') : null,
+          el('button', { type: 'button', class: 'pill', onclick: acceptAll }, 'Tout est bon'),
+        ),
       ),
     );
   }
 
-  if (!isRunning(job) && progress.done === progress.total) {
-    cards.push(
-      el('div', { class: 'card' }, el('h3', { text: 'Vidéo prête' }), el('div', { class: 'frame' }, el('video', { src: `/api/video?id=${enc(ch.id)}&v=${Date.now()}`, controls: true, preload: 'metadata' }))),
-    );
-  }
 
-  cards.push(
-    el(
-      'div',
-      { class: 'card' },
-      el('h3', { text: 'Gestes' }),
-      el(
-        'ul',
-        { class: 'gestures' },
-        el('li', {}, el('b', { text: 'Clic sur une ligne' }), el('span', { class: 'muted', text: 'la supprimer' })),
-        el('li', {}, el('b', { text: 'Clic sur une case' }), el('span', { class: 'muted', text: 'couper ici (aimanté sur la marge la plus proche)' })),
-        el('li', {}, el('b', { text: 'Glisser une ligne' }), el('span', { class: 'muted', text: 'l’ajuster' })),
-        el('li', {}, el('b', { text: 'Ctrl+Z' }), el('span', { class: 'muted', text: 'annuler' })),
-      ),
-    ),
-  );
+  if (showIntro()) cards.unshift(introCard());
   side.replaceChildren(...cards);
+}
+
+/* ---------- Mode d'emploi : affiché en haut à la première visite, rouvrable avec « ? » ---------- */
+
+function showIntro() {
+  try {
+    return state.introOpen ?? localStorage.getItem('studio.intro.seen') !== '1';
+  } catch {
+    return state.introOpen ?? true;
+  }
+}
+
+function closeIntro() {
+  state.introOpen = false;
+  try {
+    localStorage.setItem('studio.intro.seen', '1');
+  } catch {}
+  renderSide();
+}
+
+function introCard() {
+  return el(
+    'div',
+    { class: 'card intro-card' },
+    el('h3', { text: 'Comment ça marche' }),
+    el(
+      'ol',
+      {},
+      el('li', {}, 'Les ', el('b', { text: 'lignes' }), ' sur le chapitre sont les coupes proposées : chaque morceau devient une case de la vidéo.'),
+      el('li', {}, el('b', { text: 'Clic sur une ligne' }), ' : la supprimer. ', el('b', { text: 'Clic dans une case' }), ' : couper ici. ', el('b', { text: 'Glisser' }), ' : ajuster.'),
+      el('li', {}, 'Pointillés et badges orange = ', el('b', { text: 'à vérifier' }), '. Le reste est sûr.'),
+      el('li', {}, 'Survole une case pour voir sa frame ici. Puis ', el('b', { text: 'Créer la vidéo' }), '.'),
+    ),
+    el('button', { type: 'button', class: 'pill accent', onclick: closeIntro }, icon('check'), 'Compris'),
+  );
+}
+
+/* ---------- Bulle d'aide qui suit le curseur ---------- */
+
+function onStripHover(event) {
+  const hint = $('#hint');
+  if (!hint) return;
+  if (state.drag) {
+    hint.hidden = true;
+    return;
+  }
+  hint.textContent = event.target.closest('.cut') ? 'Clic : supprimer · Glisser : ajuster' : 'Clic : couper ici';
+  hint.style.left = `${event.clientX}px`;
+  hint.style.top = `${event.clientY}px`;
+  hint.hidden = false;
+}
+
+function remaining(job) {
+  // estimation d'après la vitesse de l'étape en cours
+  if (job.progress == null || job.progress <= 0.02 || !job.step_started) return '';
+  const elapsed = Date.now() / 1000 - job.step_started;
+  const left = (elapsed / job.progress) * (1 - job.progress);
+  if (left < 60) return ' · moins d’une minute';
+  return ` · ≈ ${Math.round(left / 60)} min restantes`;
+}
+
+function counted(job) {
+  // « 6 210 / 12 960 images » : ce qui est fait sur le total de l'étape
+  if (job.total == null) return '';
+  return ` · ${job.done.toLocaleString('fr-FR')} / ${job.total.toLocaleString('fr-FR')} ${job.unit}`;
 }
 
 function jobCard(job) {
   const at = JOB_STEPS.findIndex(([step]) => step === job.step);
+  const title = job.status === 'error' ? 'Erreur' : job.status === 'queued' ? 'En attente…' : 'Création de la vidéo';
+  const detail =
+    job.status === 'running' && at >= 0
+      ? `Étape ${at + 1}/${JOB_STEPS.length} · ${job.label}${counted(job)}${job.progress != null ? ` · ${Math.round(job.progress * 100)} %` : ''}${remaining(job)}`
+      : '';
   return el(
     'div',
-    { class: 'card' },
-    el('div', { class: 'job' }, job.status === 'error' ? icon('alert') : el('span', { class: 'spinner' }), job.status === 'error' ? 'Erreur' : job.status === 'queued' ? 'En attente…' : `${job.label}…`),
+    { class: 'card', id: 'job-card' },
+    el('div', { class: 'job' }, job.status === 'error' ? icon('alert') : el('span', { class: 'spinner' }), title),
+    detail ? el('p', { class: 'job-progress', text: detail }) : null,
+    job.progress != null && job.status === 'running' ? el('div', { class: 'bar' }, el('span', { style: `width:${job.progress * 100}%` })) : null,
     job.error ? el('p', { class: 'muted', style: 'margin-top:6px', text: job.error }) : null,
     el(
       'div',
@@ -339,13 +437,30 @@ function showPreview(i) {
   clearTimeout(previewTimer);
   document.querySelectorAll('.panel.on').forEach((n) => n.classList.remove('on'));
   document.querySelectorAll('.panel')[i]?.classList.add('on');
-  previewTimer = setTimeout(() => {
+  previewTimer = setTimeout(async () => {
     const p = state.panels[i];
     if (!p) return;
-    const img = el('img', { src: `/api/preview?id=${enc(state.chapter.id)}&y0=${p.y0}&y1=${p.y1}`, alt: '' });
-    $('#preview')?.replaceChildren(img);
+    const id = state.chapter.id;
+    // on demande au serveur les frames exactes que la vidéo fera pour cette case
+    let frames;
+    try {
+      frames = await api(`/api/panel?id=${enc(id)}&y0=${p.y0}&y1=${p.y1}`);
+    } catch {
+      return;
+    }
+    if (state.chapter?.id !== id || state.panels[i] !== p) return;
+    const src = ([a, b]) => `/api/preview?id=${enc(id)}&y0=${a}&y1=${b}&x0=${frames.x0}&x1=${frames.x1}`;
+    const n = frames.parts.length;
+    const box = $('#preview');
+    if (!box) return;
+    box.classList.toggle('multi', n > 1);
+    box.style.setProperty('--n', n);
+    box.replaceChildren(...frames.parts.map((part) => el('img', { src: src(part), alt: '' })));
     const caption = $('#preview-caption');
-    if (caption) caption.textContent = `Case ${i + 1} · ${fmt(p.screens)} écran${p.screens >= 2 ? 's' : ''}${p.screens > 1.25 ? ' · coupée en plusieurs frames' : ''}`;
+    if (caption) {
+      const size = `${fmt(p.screens)} écran${p.screens >= 2 ? 's' : ''}`;
+      caption.textContent = n > 1 ? `Case ${i + 1} · ${size} · la vidéo la montre en ${n} frames` : `Case ${i + 1} · ${size} · telle quelle dans la vidéo`;
+    }
   }, 90);
 }
 
@@ -414,7 +529,7 @@ function onStripClick(event) {
 }
 
 function commit(cuts, message) {
-  state.undo.push({ cuts: state.cuts, reviewed: state.reviewed });
+  state.undo.push(snapshot());
   state.cuts = cuts.sort((a, b) => a.y - b.y);
   state.panels = localPanels();
   renderOverlays();
@@ -436,6 +551,7 @@ function undo() {
   if (!previous) return;
   state.cuts = previous.cuts;
   state.reviewed = previous.reviewed;
+  state.checked = previous.checked || [];
   state.panels = localPanels();
   renderOverlays();
   renderHead();
@@ -453,7 +569,7 @@ function scheduleSave() {
 function saveNow() {
   clearTimeout(saveTimer);
   const id = state.chapter.id;
-  const body = JSON.stringify({ cuts: state.cuts, reviewed: state.reviewed });
+  const body = JSON.stringify({ cuts: state.cuts, reviewed: state.reviewed, checked: state.checked });
   saving = saving
     .then(() => api(`/api/cuts?id=${enc(id)}`, { method: 'PUT', body }))
     .then((res) => {
@@ -471,7 +587,29 @@ function nextDoubt() {
   const list = doubts();
   if (!list.length) return;
   state.doubt = (state.doubt + 1) % list.length;
-  const target = list[state.doubt];
+  focusDoubt(list[state.doubt]);
+  renderSide();
+}
+
+function keepDoubt() {
+  // « C'est bon » : l'endroit en cours est vérifié, on passe au suivant
+  const list = doubts();
+  const target = list[Math.min(state.doubt, list.length - 1)];
+  if (!target) return;
+  state.undo.push(snapshot());
+  if (target.kind === 'cut') state.cuts = state.cuts.map((c) => (c.y === target.y ? { ...c, sure: true } : c));
+  else state.checked = [...state.checked, target.panel.y0];
+  const rest = doubts();
+  state.doubt = rest.length ? Math.min(state.doubt, rest.length - 1) : -1;
+  renderOverlays();
+  renderHead();
+  renderSide();
+  scheduleSave();
+  if (rest.length) focusDoubt(rest[state.doubt]);
+  else toast('Tout est vérifié', { label: 'Annuler', run: undo });
+}
+
+function focusDoubt(target) {
   const strip = $('#strip');
   const main = $('main');
   const top = strip.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop + target.y * scale();
@@ -487,7 +625,7 @@ function nextDoubt() {
 
 function acceptAll() {
   const cuts = state.cuts.map((c) => ({ ...c, sure: true }));
-  state.undo.push({ cuts: state.cuts, reviewed: state.reviewed });
+  state.undo.push(snapshot());
   state.cuts = cuts;
   state.reviewed = true;
   renderOverlays();
@@ -498,7 +636,7 @@ function acceptAll() {
 }
 
 async function resetCuts() {
-  const before = { cuts: state.cuts, reviewed: state.reviewed };
+  const before = snapshot();
   await saveNow();
   try {
     const ch = await api(`/api/cuts/reset?id=${enc(state.chapter.id)}`, { method: 'POST' });
@@ -546,7 +684,13 @@ async function poll() {
     const after = findEpisode(state.current)?.job;
     if (state.chapter && JSON.stringify(before) !== JSON.stringify(after)) {
       renderHead();
-      renderSide();
+      // pendant un travail on ne redessine que la carte d'avancement (l'aperçu reste en place)
+      const card = $('#job-card');
+      if (isRunning(after) && isRunning(before) && card) card.replaceWith(jobCard(after));
+      else {
+        renderSide();
+        if (isRunning(before) && after?.status === 'done') $('#side').scrollTo({ top: 0, behavior: 'smooth' });
+      }
     }
   } catch {}
   const busy = state.library?.series.some((s) => s.chapters.some((c) => isRunning(c.job)));

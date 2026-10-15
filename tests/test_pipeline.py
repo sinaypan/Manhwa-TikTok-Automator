@@ -40,6 +40,23 @@ def test_bg_mode_changes_output():
     assert not np.array_equal(blur, black)
 
 
+def test_auto_background_keeps_page_color_and_side_margins():
+    """Une case de texte sur blanc : fond blanc et marges, pas d'énormes lettres floues."""
+    import cv2
+
+    text = np.full((60, 700, 3), 255, np.uint8)
+    cv2.putText(text, "HOW TERRIBLE OF A HUMAN AM I", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (40, 30, 200), 3)
+    out = letterbox(text, 1080, 1920, "auto")
+    assert out[0, 0].tolist() == [255, 255, 255] and out[960, 10].tolist() == [255, 255, 255]
+    cols = np.flatnonzero((out != 255).any(axis=(0, 2)))
+    assert cols[0] >= 1080 * 0.06 and cols[-1] <= 1080 * 0.94  # marge de chaque côté
+
+
+def test_auto_background_blurs_full_bleed_art():
+    art = np.random.default_rng(1).integers(0, 255, (900, 800, 3), dtype=np.uint8)
+    assert np.array_equal(letterbox(art, 1080, 1920, "auto"), letterbox(art, 1080, 1920, "blur"))
+
+
 def test_letterbox_always_fills_the_frame():
     """Régression : certaines proportions donnaient une frame vide (arrondi à 1 px près)."""
     rng = np.random.default_rng(0)

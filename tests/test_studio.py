@@ -64,6 +64,22 @@ def test_edit_and_reset_cuts(client):
     assert len(reset["cuts"]) == 2 and not reset["edited"]
 
 
+def test_notice_tells_manual_frames_from_outdated_ones(client, inbox):
+    api, cfg = client
+    chapter = Chapter(inbox / "Série Test" / "chapter-001")
+    build_frames(chapter, cfg)
+    ch = api.get("/api/chapter", params={"id": CID}).json()
+    assert ch["manual_frames"] == 0 and not ch["stale_frames"]
+    api.put("/api/cuts", params={"id": CID}, json={"cuts": ch["cuts"][:1]})
+    ch = api.get("/api/chapter", params={"id": CID}).json()
+    assert ch["manual_frames"] == 0 and ch["stale_frames"]  # retouchée après la vidéo
+    data = chapter.load()
+    for f in data["frames"]:
+        f.pop("panel")  # comme des frames de l'ancienne fenêtre
+    chapter.save(data)
+    assert api.get("/api/chapter", params={"id": CID}).json()["manual_frames"] == 3
+
+
 def test_unknown_or_escaping_chapter_is_refused(client):
     api, _ = client
     assert api.get("/api/chapter", params={"id": "../../Windows"}).status_code == 404
@@ -78,11 +94,26 @@ def test_build_frames_keeps_text_of_unchanged_crops(inbox):
     data["frames"][0].update({"text": "HELLO THERE", "ocr_key": "k"})
     chapter.save(data)
     # on retire la 2e coupe : la 1re case ne change pas et garde son texte ; la case
-    # fusionnée (1020 px, plus haute qu'un écran) est coupée en 2 frames
+    # fusionnée (1020 px, moins de 2 écrans) reste une seule frame
     data["cut"]["cuts"] = data["cut"]["cuts"][:1]
     chapter.save(data)
-    assert build_frames(chapter, cfg) == 3
+    assert build_frames(chapter, cfg) == 2
     frames = chapter.load()["frames"]
     assert frames[0]["text"] == "HELLO THERE"
-    assert [f["panel"] for f in frames] == [0, 1, 1]
+    assert [f["panel"] for f in frames] == [0, 1]
     assert "text" not in frames[1]
+    assert sorted(p.name for p in chapter.frames_dir.iterdir()) == ["frame_0001.jpg", "frame_0002.jpg"]
+
+
+def test_preview_announces_the_same_frames_as_the_video(client, inbox):
+    """Régression : l'aperçu montrait la case entière alors que la vidéo la coupait en deux."""
+    api, cfg = client
+    ch = api.get("/api/chapter", params={"id": CID}).json()
+    api.put("/api/cuts", params={"id": CID}, json={"cuts": []})  # une seule case de 1 700 px
+    chapter = Chapter(inbox / "Série Test" / "chapter-001")
+    build_frames(chapter, cfg)
+    video = [f["crop"] for f in chapter.load()["frames"]]
+    p = api.put("/api/cuts", params={"id": CID}, json={"cuts": []}).json()["panels"][0]
+    announced = api.get("/api/panel", params={"id": CID, "y0": p["y0"], "y1": p["y1"]}).json()
+    assert [[a, b - a] for a, b in announced["parts"]] == [[c[1], c[3]] for c in video]
+    assert len(video) == 2  # 1 660 px > 2 écrans de 711 px

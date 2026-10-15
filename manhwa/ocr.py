@@ -152,8 +152,11 @@ def ocr_key(frame, data, cfg):
     return fingerprint(OCR_VERSION, frame["crop"], data.get("strip"), cfg["ocr"]["lang"], cfg["ocr"]["psm"])
 
 
-def run_ocr(chapter, cfg, force=False):
-    """Lit le texte des frames qui ne l'ont pas encore (ou dont le crop a changé)."""
+def run_ocr(chapter, cfg, force=False, progress=None):
+    """Lit le texte des frames qui ne l'ont pas encore (ou dont le crop a changé).
+
+    progress(faites, total) est appelé après chaque frame (pour le Studio).
+    """
     data = chapter.load()
     frames = data["frames"]
     if not frames:
@@ -174,7 +177,7 @@ def run_ocr(chapter, cfg, force=False):
         return 0
 
     found = 0
-    for frame in todo:
+    for done, frame in enumerate(todo, start=1):
         x, y, w, h = frame["crop"]
         frame["text"] = read_text(strip[y:y + h, x:x + w], cfg)
         frame["ocr_key"] = ocr_key(frame, data, cfg)
@@ -183,6 +186,8 @@ def run_ocr(chapter, cfg, force=False):
             print(f"  [OK] {frame['file']} | {frame['text'][:70]}")
         else:
             print(f"  [--] {frame['file']} | (rien / bruit)")
+        if progress:
+            progress(done, len(todo))
     chapter.save(data)
     print(f"  OCR : {found} textes trouvés sur {len(todo)} frames relues.")
     return len(todo)

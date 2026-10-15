@@ -10,7 +10,7 @@ DEFAULTS = {
     "inbox": "inbox",
     "slicer": {
         "max_src_width": 1200,
-        "bg_mode": "blur",
+        "bg_mode": "auto",
         "blur_ksize": 61,
         "move_step": 20,
         "resize_step": 20,

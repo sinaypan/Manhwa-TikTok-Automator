@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 
 from manhwa.images import letterbox, load_strip, read_image, write_jpeg
-from manhwa.panels import STUDIO_DIR, horizontal_bounds, load_analysis
+from manhwa.panels import STUDIO_DIR, horizontal_bounds, load_analysis, split_tall
 
 TILE_W = 600   # largeur d'affichage (≈ 2× la largeur à l'écran, pour rester net)
 TILE_H = 1600  # hauteur d'une tranche en pixels d'affichage
@@ -55,17 +55,45 @@ def prepare(chapter, cfg):
     return analysis, meta
 
 
-def preview(chapter, meta, analysis, y0, y1, size=(270, 480), bg_mode="blur"):
-    """Aperçu 9:16 d'une case, assemblé depuis les vignettes (rapide, sans recharger le strip)."""
+def _block(chapter, meta, analysis, y0, y1):
+    """Les lignes y0 → y1 du strip, en résolution d'affichage, depuis les vignettes."""
     scale = meta["width"] / analysis["width"]
     rows = meta["rows"]
     first, last = y0 // rows, max(y0, y1 - 1) // rows
     parts = [read_image(tiles_dir(chapter) / f"{i:04d}.jpg") for i in range(first, last + 1)]
     parts = [p for p in parts if p is not None]
     if not parts:
-        return None
+        return None, scale
     block = np.vstack(parts)
     top = round((y0 - first * rows) * scale)
-    crop = block[top:top + max(1, round((y1 - y0) * scale))]
-    x0, x1 = horizontal_bounds(crop, 0, crop.shape[0])
-    return letterbox(crop[:, x0:x1], size[0], size[1], bg_mode, 21)
+    return block[top:top + max(1, round((y1 - y0) * scale))], scale
+
+
+def panel_frames(chapter, meta, analysis, y0, y1):
+    """Les frames que la vidéo fera pour cette case : mêmes marges et même découpage
+    que build_frames (calculés ici sur les vignettes), pour un aperçu fidèle.
+
+    Renvoie {"x0", "x1", "parts": [[a, b], ...]} en lignes du strip, ou None.
+    """
+    block, scale = _block(chapter, meta, analysis, y0, y1)
+    if block is None:
+        return None
+    bx0, bx1 = horizontal_bounds(block, 0, block.shape[0])
+    x0, x1 = round(bx0 / scale), round(bx1 / scale)
+    parts = split_tall(y0, y1, x1 - x0, analysis["std"])
+    return {"x0": x0, "x1": x1, "parts": [[int(a), int(b)] for a, b in parts]}
+
+
+def preview(chapter, meta, analysis, y0, y1, x0=None, x1=None, size=(270, 480), bg_mode="auto"):
+    """Aperçu 9:16 d'une frame, assemblé depuis les vignettes (rapide, sans recharger le strip).
+
+    x0/x1 (lignes du strip) : marges de la case ; sinon calculées sur ce morceau.
+    """
+    crop, scale = _block(chapter, meta, analysis, y0, y1)
+    if crop is None:
+        return None
+    if x0 is None or x1 is None:
+        cx0, cx1 = horizontal_bounds(crop, 0, crop.shape[0])
+    else:
+        cx0, cx1 = round(x0 * scale), round(x1 * scale)
+    return letterbox(crop[:, cx0:cx1], size[0], size[1], bg_mode, 21)

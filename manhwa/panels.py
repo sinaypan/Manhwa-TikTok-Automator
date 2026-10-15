@@ -15,8 +15,10 @@ import numpy as np
 from manhwa.images import load_strip
 from manhwa.project import fingerprint
 
-AUTOCUT_VERSION = 1
+PROFILE_VERSION = 1      # change la clé du cache .studio/ (profil des lignes)
+AUTOCUT_VERSION = 2      # version de la proposition de coupes (v2 : séparations cachées)
 BLANK_STD = 8.0          # texture max d'une ligne « unie » (le bruit JPEG/WebP reste dessous)
+THIN_LINE_STD = 4.0      # un trait fin entre deux cases doit être parfaitement uni
 ANALYSIS_FILE = "analysis.npz"
 STUDIO_DIR = ".studio"   # cache du chapitre (profil, vignettes), jamais nécessaire au rendu
 
@@ -104,7 +106,41 @@ def auto_cuts(std, mean, width):
                 del cuts[min(candidates, key=lambda j: cuts[j]["gap"])]
                 changed = True
                 break
-    return [{"y": c["y"], "sure": c["sure"]} for c in cuts]
+    out = [{"y": c["y"], "sure": c["sure"]} for c in cuts]
+    return sorted(out + hidden_separations(std, [c["y"] for c in out], width), key=lambda c: c["y"])
+
+
+def hidden_separations(std, cut_ys, width):
+    """Dans les cases hautes, les séparations probables qui ne sont pas de vraies marges.
+
+    Une marge trop fine pour être une vraie gouttière (quelques px) sépare souvent deux
+    cases. On la propose comme coupe incertaine (« à vérifier »), jamais près du bord
+    d'une case, au plus une par écran.
+    """
+    screen = width * 16 / 9
+    min_gap = max(6, int(width * 0.015))
+    found = []
+    for y0, y1 in panels_from_cuts(cut_ys, std):
+        h = y1 - y0
+        if h <= 1.5 * screen:
+            continue
+        lo, hi = y0 + int(0.25 * screen), y1 - int(0.25 * screen)
+        inner = std[lo:hi]
+        # marge très fine : quelques lignes parfaitement unies (un trait entre deux cases).
+        # Seuil plus strict que BLANK_STD : un aplat sombre du dessin (vêtement, nuit) est
+        # presque uni et donnait de fausses alertes. Les zones « calmes » (fondu, brume) ont
+        # aussi été essayées : elles attrapaient les cheveux et les vêtements sombres.
+        candidates = [(a, b) for a, b in _runs(inner < THIN_LINE_STD) if 3 <= b - a < min_gap]
+        # les plus longues d'abord, sans doublons proches
+        chosen = []
+        for a, b in sorted(candidates, key=lambda r: r[1] - r[0], reverse=True):
+            y = lo + (a + b) // 2
+            if all(abs(y - c) > 0.4 * screen for c in chosen):
+                chosen.append(y)
+            if len(chosen) >= int(h // screen):
+                break
+        found += [{"y": y, "sure": False} for y in chosen]
+    return found
 
 
 def snap(y, gutters, radius):
@@ -149,17 +185,22 @@ def horizontal_bounds(strip, y0, y1):
     return x0, x1
 
 
-def split_tall(y0, y1, width, std):
-    """Une case plus haute qu'un écran 9:16 est coupée en plusieurs frames.
+MAX_SCREENS_WHOLE = 2.0  # jusqu'à 2 écrans, une case reste entière (un peu réduite, pas zoomée)
 
+
+def split_tall(y0, y1, width, std):
+    """Une case de plus de 2 écrans 9:16 est coupée en plusieurs frames.
+
+    En dessous, on la garde entière : couper un visage en deux frames zoomées est pire
+    qu'une case un peu réduite (c'était le cas dès 1,25 écran avant).
     Temporaire : en phase 5, une case haute sera parcourue en défilement.
     Chaque coupe tombe sur la ligne la moins chargée près du découpage régulier,
     pour éviter de trancher une bulle.
     """
     screen = width * 16 / 9
-    n = max(1, math.ceil((y1 - y0) / (screen * 1.25)))
-    if n == 1:
+    if (y1 - y0) <= MAX_SCREENS_WHOLE * screen:
         return [(y0, y1)]
+    n = math.ceil((y1 - y0) / (screen * 1.6))
     step = (y1 - y0) / n
     edges = [y0]
     for k in range(1, n):
@@ -186,7 +227,7 @@ def frame_crops(strip, panels, std):
 def pages_key(chapter, max_width):
     pages = chapter.pages()
     stats = [(p.name, p.stat().st_size, p.stat().st_mtime_ns) for p in pages]
-    return fingerprint(AUTOCUT_VERSION, max_width, stats)
+    return fingerprint(PROFILE_VERSION, max_width, stats)
 
 
 def analysis_path(chapter):
@@ -237,9 +278,13 @@ def ensure_cuts(chapter, cfg, data=None, analysis=None):
     if analysis is None:
         return data, None
     cut = data.get("cut")
-    if not cut or cut.get("key") != analysis["key"]:
+    pages_changed = not cut or cut.get("key") != analysis["key"]
+    # une découpe retouchée à la main n'est jamais remplacée, sauf si les pages ont changé
+    outdated = cut and not cut.get("edited") and cut.get("auto_version", 1) != AUTOCUT_VERSION
+    if pages_changed or outdated:
         data["cut"] = {
             "key": analysis["key"],
+            "auto_version": AUTOCUT_VERSION,
             "cuts": auto_cuts(analysis["std"], analysis["mean"], analysis["width"]),
             "edited": False,
             "validated": False,
@@ -248,7 +293,7 @@ def ensure_cuts(chapter, cfg, data=None, analysis=None):
     return data, analysis
 
 
-def build_frames(chapter, cfg, bg_mode=None):
+def build_frames(chapter, cfg, bg_mode=None, progress=None):
     """Écrit les frames 9:16 d'après les coupes, en gardant OCR et voix des crops inchangés."""
     from manhwa.images import letterbox, write_jpeg
 
@@ -271,6 +316,8 @@ def build_frames(chapter, cfg, bg_mode=None):
         out = letterbox(strip[y:y + h, x:x + w], cfg["output"]["width"], cfg["output"]["height"],
                         bg_mode, sc["blur_ksize"])
         write_jpeg(chapter.frames_dir / name, out, sc["jpeg_quality"])
+        if progress:
+            progress(i, len(crops))
         frame = {k: v for k, v in previous.get(tuple(crop), {}).items() if k in ("text", "ocr_key", "audio", "audio_key")}
         frame.update({"file": name, "crop": crop, "bg": bg_mode, "panel": panel})
         frames.append(frame)

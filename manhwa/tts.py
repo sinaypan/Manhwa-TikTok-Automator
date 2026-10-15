@@ -19,8 +19,9 @@ async def _synthesize(text, path, cfg):
     os.replace(tmp, path)  # jamais de fichier à moitié écrit pris pour un vrai
 
 
-async def _run(chapter, data, todo, cfg):
+async def _run(chapter, data, todo, cfg, progress=None):
     sem = asyncio.Semaphore(max(1, cfg["tts"]["concurrency"]))
+    finished = [0]
 
     async def one(frame):
         # nommé d'après le texte et la voix : une frame renumérotée garde sa voix
@@ -31,6 +32,10 @@ async def _run(chapter, data, todo, cfg):
             except Exception as e:
                 print(f"  [!] {frame['file']} : échec TTS ({e})")
                 return
+            finally:
+                finished[0] += 1
+                if progress:
+                    progress(finished[0], len(todo))
         frame["audio"] = f"{chapter.audio_dir.name}/{path.name}"
         frame["audio_key"] = audio_key(frame["text"], cfg)
         print(f"  [OK] {path.name} | {frame['text'][:50]}")
@@ -38,7 +43,7 @@ async def _run(chapter, data, todo, cfg):
     await asyncio.gather(*(one(f) for f in todo))
 
 
-def run_tts(chapter, cfg, force=False):
+def run_tts(chapter, cfg, force=False, progress=None):
     data = chapter.load()
     todo = []
     for frame in data["frames"]:
@@ -57,7 +62,7 @@ def run_tts(chapter, cfg, force=False):
 
     chapter.audio_dir.mkdir(parents=True, exist_ok=True)
     print(f"  Génération de {len(todo)} voix ({cfg['tts']['voice']})...")
-    asyncio.run(_run(chapter, data, todo, cfg))
+    asyncio.run(_run(chapter, data, todo, cfg, progress))
     chapter.save(data)
     _remove_unused(chapter, data)
     return len(todo)

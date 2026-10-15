@@ -158,7 +158,7 @@ def run_slicer(chapter, cfg):
     view_h = clamp(int(W * 16 / 9), 1, H)
     state = {"view_y": 0}
     crop = CropBox(W, view_h)
-    bg_mode = sc["bg_mode"] if sc["bg_mode"] in BG_MODES else "blur"
+    bg_mode = sc["bg_mode"] if sc["bg_mode"] in BG_MODES else "auto"
     step, resize_step = sc["move_step"], sc["resize_step"]
     show_help = True
     last_save = 0.0

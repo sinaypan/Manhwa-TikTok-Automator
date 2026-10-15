@@ -6,7 +6,8 @@ import cv2
 import numpy as np
 
 SUPPORTED = (".jpg", ".jpeg", ".png", ".webp")
-BG_MODES = ("blur", "black", "gray")
+BG_MODES = ("auto", "blur", "black", "gray")
+SOLID_MARGIN = 0.07  # fond uni : marge de chaque côté (7 % de la largeur de la frame)
 
 
 def natural_key(name):
@@ -86,11 +87,47 @@ def make_background(frame, mode, blur_ksize=61):
     return cv2.GaussianBlur(frame, (k, k), 0)
 
 
-def letterbox(crop, out_w, out_h, bg_mode="blur", blur_ksize=61):
-    """Place le crop au centre d'une image out_w x out_h, sur un fond flou/noir/gris."""
+def border_color(crop, band=3, tol=24, share=0.75):
+    """Couleur du fond autour de la case si son bord est uni (blanc, noir…), sinon None.
+
+    Le crop est déjà rogné au plus près du contenu : une case de texte touche ses bords
+    par endroits. On regarde donc si la plupart des pixels du bord (75 %) ont la même
+    couleur, pas tous.
+    """
+    h, w = crop.shape[:2]
+    b = max(1, min(band, h // 4, w // 4))
+    edge = np.concatenate([
+        crop[:b].reshape(-1, 3), crop[-b:].reshape(-1, 3),
+        crop[:, :b].reshape(-1, 3), crop[:, -b:].reshape(-1, 3),
+    ]).astype(np.int16)
+    median = np.median(edge, axis=0)
+    close = (np.abs(edge - median).max(axis=1) <= tol).mean()
+    return tuple(int(v) for v in median) if close >= share else None
+
+
+def letterbox(crop, out_w, out_h, bg_mode="auto", blur_ksize=61):
+    """Place le crop au centre d'une image out_w x out_h.
+
+    bg_mode "auto" : si la case est posée sur un fond uni (texte sur blanc, case sur
+    noir), le fond reprend cette couleur et la case garde une marge de chaque côté,
+    comme sur la page ; sinon fond flou. "blur" / "black" / "gray" : forcé.
+    """
     if crop is None or crop.size == 0:
         return None
     ch, cw = crop.shape[:2]
+
+    if bg_mode == "auto":
+        color = border_color(crop)
+        if color is None:
+            bg_mode = "blur"
+        else:
+            bg = np.full((out_h, out_w, 3), color, np.uint8)
+            box_w, box_h = round(out_w * (1 - 2 * SOLID_MARGIN)), round(out_h * (1 - 2 * SOLID_MARGIN))
+            scale = min(box_w / cw, box_h / ch)
+            new_w, new_h = max(1, round(cw * scale)), max(1, round(ch * scale))
+            y, x = (out_h - new_h) // 2, (out_w - new_w) // 2
+            bg[y:y + new_h, x:x + new_w] = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            return bg
 
     # "cover" : le crop agrandi remplit tout le cadre et sert de base au fond
     scale_cover = max(out_w / cw, out_h / ch)

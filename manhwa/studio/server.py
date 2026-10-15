@@ -82,7 +82,9 @@ def create_app(cfg):
     def chapter_detail(id: str = Query(...)):
         chapter, analysis, meta, data = prepared(id)
         cut = data["cut"]
-        manual = bool(data["frames"]) and not cut.get("validated")
+        # frames de l'ancienne fenêtre de découpe : elles n'ont pas de numéro de case
+        manual = bool(data["frames"]) and not any("panel" in f for f in data["frames"])
+        stale = bool(data["frames"]) and not manual and not cut.get("validated")
         return {
             "id": id,
             "series": id.split("/")[0],
@@ -96,8 +98,10 @@ def create_app(cfg):
             "panels": describe_panels([c["y"] for c in cut["cuts"]], analysis),
             "edited": cut.get("edited", False),
             "reviewed": cut.get("reviewed", False),
+            "checked": cut.get("checked", []),
             "validated": cut.get("validated", False),
             "manual_frames": len(data["frames"]) if manual else 0,
+            "stale_frames": stale,
             "progress": chapter_progress(chapter, cfg),
             "job": jobs.get(id),
         }
@@ -123,7 +127,8 @@ def create_app(cfg):
         with lock_for(id):
             data = chapter.load()
             data["cut"].update({"cuts": cuts, "edited": True, "validated": False,
-                                "reviewed": bool(payload.get("reviewed", False))})
+                                "reviewed": bool(payload.get("reviewed", False)),
+                                "checked": [int(y) for y in payload.get("checked", [])][:500]})
             chapter.save(data)
         return {"cuts": cuts, "panels": describe_panels([c["y"] for c in cuts], analysis)}
 
@@ -136,10 +141,21 @@ def create_app(cfg):
             chapter.save(data)
         return chapter_detail(id)
 
-    @app.get("/api/preview")
-    def panel_preview(id: str = Query(...), y0: int = Query(..., ge=0), y1: int = Query(..., gt=0)):
+    @app.get("/api/panel")
+    def panel_frames(id: str = Query(...), y0: int = Query(..., ge=0), y1: int = Query(..., gt=0)):
+        """Les frames que la vidéo fera pour une case (pour un aperçu fidèle)."""
         chapter, analysis, meta, _ = prepared(id)
-        img = tiles.preview(chapter, meta, analysis, y0, min(y1, analysis["height"]))
+        frames = tiles.panel_frames(chapter, meta, analysis, y0, min(y1, analysis["height"]))
+        if frames is None:
+            raise HTTPException(404, "Case introuvable")
+        return frames
+
+    @app.get("/api/preview")
+    def panel_preview(id: str = Query(...), y0: int = Query(..., ge=0), y1: int = Query(..., gt=0),
+                      x0: int | None = Query(None, ge=0), x1: int | None = Query(None, gt=0)):
+        chapter, analysis, meta, _ = prepared(id)
+        img = tiles.preview(chapter, meta, analysis, y0, min(y1, analysis["height"]), x0, x1,
+                            bg_mode=cfg["slicer"]["bg_mode"])  # même fond que les frames
         if img is None:
             raise HTTPException(404, "Aperçu impossible")
         ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 85])

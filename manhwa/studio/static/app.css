@@ -508,13 +508,71 @@ main {
 
 /* ---------- Colonne de droite : aperçu ---------- */
 
+/* La colonne défile toute seule : on voit tout l'aperçu sans descendre le strip. */
 .side {
   position: sticky;
   top: 86px;
   align-self: start;
   display: flex;
+  max-height: calc(100vh - 100px);
   flex-direction: column;
   gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--sep) transparent;
+  scrollbar-width: thin;
+}
+
+.side .frame.video {
+  height: 34vh;
+}
+
+.side .frame {
+  max-height: 46vh;
+  margin: 0 auto;
+  aspect-ratio: 9 / 16;
+  width: auto;
+  height: 46vh;
+}
+
+/* ---------- Mode d'emploi (première visite) et bulle d'aide au curseur ---------- */
+
+.intro-card {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--tint);
+}
+
+.intro-card ol {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding-left: 18px;
+}
+
+.intro-card li::marker {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+#hint {
+  position: fixed;
+  z-index: 30;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(14px, 14px);
+}
+
+.job-progress {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .card {
@@ -536,6 +594,22 @@ main {
   overflow: hidden;
   border-radius: 12px;
   background: var(--bg);
+}
+
+/* une case montrée en plusieurs frames : les frames côte à côte, dans l'ordre */
+.frame.multi {
+  display: grid;
+  grid-template-columns: repeat(var(--n), 1fr);
+  gap: 4px;
+  aspect-ratio: auto;
+  height: auto;
+  background: none;
+}
+
+.frame.multi img {
+  aspect-ratio: 9 / 16;
+  height: auto;
+  border-radius: 8px;
 }
 
 .frame img,
@@ -721,11 +795,13 @@ main {
     position: static;
     order: -1;
     display: grid;
+    max-height: none;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    overflow: visible;
   }
 
   .side .frame {
-    max-width: 220px;
+    height: 360px;
   }
 }
 

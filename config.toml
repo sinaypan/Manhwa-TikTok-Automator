@@ -7,7 +7,7 @@ inbox = "inbox"
 
 [slicer]
 max_src_width = 1200      # largeur max du strip (les pages plus larges sont réduites)
-bg_mode = "blur"          # fond des frames 9:16 : "blur" | "black" | "gray"
+bg_mode = "auto"          # fond des frames 9:16 : "auto" (couleur unie si la case est sur fond uni, sinon flou) | "blur" | "black" | "gray"
 blur_ksize = 61
 move_step = 20            # pas de déplacement (flèches, IJKL)
 resize_step = 20          # pas de redimensionnement (+/-)
