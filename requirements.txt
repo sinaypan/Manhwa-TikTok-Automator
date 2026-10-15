@@ -1,9 +1,9 @@
 playwright
 requests
+urllib3
 opencv-python
 numpy
 pytesseract
 Pillow
 edge-tts
 moviepy>=2.0.0
-urllib3

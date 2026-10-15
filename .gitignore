@@ -1,10 +1,15 @@
-# Ignorer les dossiers de téléchargement (Les noms de Manhwas)
+# Secrets
+.env
+
+# Chapitres téléchargés et tout ce qui est généré dedans
+inbox/*
+!inbox/.gitkeep
+
+# Ancien format V1
 */Chapitre_*
 frames_tiktok/
-__pycache__/
-*.pyc
 
-# Ignorer les fichiers médias générés à la racine
+# Médias générés
 *.mp4
 *.mp3
 *.jpg
@@ -12,8 +17,16 @@ __pycache__/
 *.webp
 transcript.txt
 
-# Ignorer les environnements virtuels
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Environnements virtuels
+.venv/
 venv/
 env/
+
+# Éditeurs
 .idea/
 .vscode/

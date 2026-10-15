@@ -1,0 +1,48 @@
+# Configuration du Manhwa TikTok Automator.
+# Les secrets (clés d'API) ne vont jamais ici : ils vont dans .env (voir .env.example).
+
+# Dossier où arrivent les chapitres : inbox/<série>/<chapitre>/
+# Chemin relatif au dossier du projet, ou absolu.
+inbox = "inbox"
+
+[slicer]
+max_src_width = 1200      # largeur max du strip (les pages plus larges sont réduites)
+bg_mode = "blur"          # fond des frames 9:16 : "blur" | "black" | "gray"
+blur_ksize = 61
+move_step = 20            # pas de déplacement (flèches, IJKL)
+resize_step = 20          # pas de redimensionnement (+/-)
+jpeg_quality = 92
+
+[output]
+width = 1080
+height = 1920
+
+[ocr]
+tesseract_cmd = ""        # vide = cherche tesseract dans le PATH puis à l'emplacement Windows par défaut
+lang = "eng"
+psm = 6
+
+[tts]
+voice = "en-US-ChristopherNeural"   # ex : "fr-FR-HenriNeural", "en-US-AriaNeural"
+rate = "+0%"                         # vitesse (+10% conseillé pour TikTok)
+volume = "+0%"
+concurrency = 4
+
+[render]
+fps = 24
+padding_seconds = 0.2      # silence ajouté après chaque réplique
+silent_frame_seconds = 2.0 # durée d'une frame sans texte
+
+[scraper]
+headless = false           # false : la fenêtre s'affiche (nécessaire pour passer Cloudflare à la main)
+workers = 5
+timeout_seconds = 20
+
+# Profils de sites : le premier profil dont un domaine apparaît dans l'URL est utilisé,
+# sinon "default". Si un site change sa mise en page, on modifie ses sélecteurs ici.
+[scraper.sites.default]
+domains = []
+title = "span.text-xl.font-bold"
+chapter_links = "a[href*='chapter']"
+image_min_width = 300
+image_extensions = [".webp"]   # liste vide = accepte toutes les images
