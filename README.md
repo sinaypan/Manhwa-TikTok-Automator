@@ -90,6 +90,17 @@ Voir où en est chaque chapitre :
 Les étapes existent aussi séparément : `cut` (découpe auto), `slice` (à la main),
 `ocr`, `tts`, `render` (avec `--force` pour refaire même si c'est à jour).
 
+### Lecture du texte (OCR)
+
+Le texte est lu par **PaddleOCR** (local, gratuit), puis regroupé en bulles dans l'ordre de
+lecture. Les onomatopées (coréennes ou anglaises), les filigranes du site, les crédits et
+les titres de chapitre sont repérés et **ne sont pas lus** par la voix ; les SFX sont gardés
+pour les bruitages. Le moteur se change dans `config.toml` (`[ocr] engine` : `paddle`,
+`windows` ou `tesseract`) ou ponctuellement avec `ocr --engine windows`.
+
+Pour comparer les moteurs sur un chapitre, mets une référence lue à la main dans
+`<chapitre>/.studio/ocr_gold.json` puis lance `python -m manhwa ocr-bench <chapitre>`.
+
 ### Contrôles de la découpe à la main (`slice`)
 
 | Touche | Action |

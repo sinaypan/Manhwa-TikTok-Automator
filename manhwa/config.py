@@ -17,7 +17,7 @@ DEFAULTS = {
         "jpeg_quality": 92,
     },
     "output": {"width": 1080, "height": 1920},
-    "ocr": {"tesseract_cmd": "", "lang": "eng", "psm": 6},
+    "ocr": {"engine": "paddle", "tesseract_cmd": "", "lang": "eng", "psm": 6},
     "tts": {
         "voice": "en-US-ChristopherNeural",
         "rate": "+0%",

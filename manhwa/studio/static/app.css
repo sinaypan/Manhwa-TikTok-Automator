@@ -535,6 +535,43 @@ main {
   height: 46vh;
 }
 
+/* ---------- Texte lu par la voix sous l'aperçu ---------- */
+
+.reading {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.reading .spoken {
+  display: grid;
+  gap: 4px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip.sfx {
+  background: color-mix(in srgb, var(--warn) 18%, var(--bg));
+  color: var(--warn);
+}
+
 /* ---------- Mode d'emploi (première visite) et bulle d'aide au curseur ---------- */
 
 .intro-card {

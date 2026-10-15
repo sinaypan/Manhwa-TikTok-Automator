@@ -5,7 +5,8 @@
     status [chemin]  état de chaque chapitre
     cut <chemin>     découpe automatique → frames 9:16
     slice <chemin>   découpe manuelle (ancienne fenêtre)
-    ocr <chemin>     lit le texte des frames
+    ocr <chemin>     lit le texte des frames (--engine paddle | windows | tesseract)
+    ocr-bench <ch.>  compare les moteurs OCR à la référence .studio/ocr_gold.json
     tts <chemin>     génère les voix
     render <chemin>  assemble la vidéo
     make [chemin]    tout d'un coup (découpe auto si besoin → OCR → voix → vidéo)
@@ -93,7 +94,31 @@ def cmd_slice(args, cfg):
 def cmd_ocr(args, cfg):
     from manhwa.ocr import run_ocr
 
+    if args.engine:
+        cfg["ocr"]["engine"] = args.engine
+
     return _for_each(args, cfg, "OCR", lambda c: run_ocr(c, cfg, force=args.force))
+
+
+def cmd_ocr_bench(args, cfg):
+    from manhwa.ocr_bench import run_bench
+
+    chapters = resolve_chapters(args.path, cfg)
+    if len(chapters) != 1:
+        print("Indique un seul chapitre (celui qui a une référence .studio/ocr_gold.json).")
+        return 1
+    report, out = run_bench(chapters[0], cfg, args.engines)
+    print()
+    print(f"{'moteur':10s} {'texte':6s} {'rappel':>7s} {'précision':>10s} {'mots en trop':>13s} {'s/frame':>8s}")
+    for name, r in report.items():
+        for kind, label in (("raw", "brut"), ("spoken", "voix")):
+            m = r[kind]
+            pct = lambda v: f"{v:.0%}" if v is not None else "-"
+            print(f"{name:10s} {label:6s} {pct(m['rappel']):>7s} {pct(m['precision']):>10s} {m['mots_en_trop']:>13d} "
+                  f"{r['secondes_par_frame'] if kind == 'raw' else '':>8}")
+    print()
+    print(f"Détail par frame : {out}")
+    return 0
 
 
 def cmd_tts(args, cfg):
@@ -152,6 +177,11 @@ def build_parser():
     p.add_argument("--force", action="store_true", help="retélécharger même si déjà complet")
     p.set_defaults(func=cmd_download)
 
+    p = sub.add_parser("ocr-bench", help="comparer les moteurs OCR à une référence lue à la main")
+    p.add_argument("path", help="le chapitre (avec .studio/ocr_gold.json)")
+    p.add_argument("--engines", nargs="+", choices=["paddle", "windows", "tesseract"])
+    p.set_defaults(func=cmd_ocr_bench)
+
     p = sub.add_parser("status", help="état des chapitres")
     p.add_argument("path", nargs="?", help="chapitre, série ou inbox (par défaut)")
     p.set_defaults(func=cmd_status)
@@ -168,6 +198,8 @@ def build_parser():
         p.add_argument("path", nargs="?", help="chapitre, série ou inbox (par défaut)")
         if name in ("ocr", "tts", "render"):
             p.add_argument("--force", action="store_true", help="refaire même si déjà à jour")
+        if name == "ocr":
+            p.add_argument("--engine", choices=["paddle", "windows", "tesseract"], help="moteur OCR (sinon config.toml)")
         if name == "make":
             p.add_argument("--manual", action="store_true", help="découper à la main au lieu de la découpe auto")
         p.set_defaults(func=func)

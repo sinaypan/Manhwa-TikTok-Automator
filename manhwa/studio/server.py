@@ -144,10 +144,14 @@ def create_app(cfg):
     @app.get("/api/panel")
     def panel_frames(id: str = Query(...), y0: int = Query(..., ge=0), y1: int = Query(..., gt=0)):
         """Les frames que la vidéo fera pour une case (pour un aperçu fidèle)."""
-        chapter, analysis, meta, _ = prepared(id)
+        chapter, analysis, meta, data = prepared(id)
         frames = tiles.panel_frames(chapter, meta, analysis, y0, min(y1, analysis["height"]))
         if frames is None:
             raise HTTPException(404, "Case introuvable")
+        # ce que l'OCR a déjà lu sur les frames de cette case (si la vidéo a été créée)
+        read = [f for f in data["frames"] if y0 <= f["crop"][1] < y1 and "bubbles" in f]
+        frames["bubbles"] = [{"text": b["text"], "kind": b["kind"]} for f in read for b in f["bubbles"]]
+        frames["ocr_done"] = bool(read)
         return frames
 
     @app.get("/api/preview")

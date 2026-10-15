@@ -18,6 +18,7 @@ width = 1080
 height = 1920
 
 [ocr]
+engine = "paddle"         # "paddle" (le plus juste) | "windows" (30× plus rapide, se trompe sur le texte stylisé) | "tesseract"
 tesseract_cmd = ""        # vide = cherche tesseract dans le PATH puis à l'emplacement Windows par défaut
 lang = "eng"
 psm = 6

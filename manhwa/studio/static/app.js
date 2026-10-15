@@ -304,6 +304,7 @@ function renderSide() {
       el('h3', { text: 'Aperçu' }),
       el('div', { class: 'frame', id: 'preview' }, el('div', { class: 'empty', text: 'Survole une case pour voir sa frame 9:16.' })),
       el('p', { class: 'caption', id: 'preview-caption', text: ' ' }),
+      el('div', { class: 'reading', id: 'reading' }),
     ),
   );
 
@@ -461,7 +462,30 @@ function showPreview(i) {
       const size = `${fmt(p.screens)} écran${p.screens >= 2 ? 's' : ''}`;
       caption.textContent = n > 1 ? `Case ${i + 1} · ${size} · la vidéo la montre en ${n} frames` : `Case ${i + 1} · ${size} · telle quelle dans la vidéo`;
     }
+    renderReading(frames);
   }, 90);
+}
+
+// ce que la voix lira pour la case survolée, et les SFX repérés (servent aux bruitages)
+const KIND_LABELS = { sfx: 'SFX', watermark: 'filigrane', credit: 'crédits', title: 'titre' };
+
+function renderReading(frames) {
+  const box = $('#reading');
+  if (!box) return;
+  if (!frames.ocr_done) {
+    box.replaceChildren(el('p', { class: 'muted', text: 'Le texte sera lu à la création de la vidéo.' }));
+    return;
+  }
+  const spoken = frames.bubbles.filter((b) => b.kind === 'dialogue');
+  const other = frames.bubbles.filter((b) => KIND_LABELS[b.kind]);
+  box.replaceChildren(
+    spoken.length
+      ? el('div', { class: 'spoken' }, ...spoken.map((b) => el('p', { text: `« ${b.text} »` })))
+      : el('p', { class: 'muted', text: 'Rien à lire dans cette case.' }),
+    other.length
+      ? el('div', { class: 'chips' }, ...other.map((b) => el('span', { class: `chip ${b.kind}`, title: b.text, text: `${KIND_LABELS[b.kind]} · ${b.text.slice(0, 18)}` })))
+      : null,
+  );
 }
 
 /* ---------- Gestes sur les coupes ---------- */

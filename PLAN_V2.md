@@ -71,6 +71,30 @@ inbox/ ─► 1. Découpe auto ─► 2. OCR local ─► 3. Description locale 
   - EasyOCR en plan B.
   On peut garder les deux meilleurs et laisser GPT-4.1 / le Studio choisir quand ils
   ne sont pas d'accord.
+- **Résultat du banc d'essai** (29 cases de référence lues à la main, chapitre 1 ; 3 cases
+  ajoutées ensuite, qui avaient révélé les mots isolés perdus → 99 % / 100 % / 0 sur 32) :
+
+  | Moteur | Mots attendus lus | Mots justes | Mots lus en trop | Temps / case |
+  |---|---|---|---|---|
+  | Tesseract (V1, filtré) | 71 % | 94 % | 4 | 0,4 s |
+  | Tesseract (+ bulles) | 89 % | 57 % | 69 | 0,3 s |
+  | OCR Windows (+ bulles) | 66 % | 73 % | 3 | 0,08 s |
+  | **PaddleOCR mobile (+ bulles)** | **100 %** | **100 %** | **0** | 2,2 s (processeur) |
+
+  PaddleOCR est retenu (`[ocr] engine = "paddle"`). Avant l'OCR, chaque case reçoit une
+  marge de la couleur de son bord (un texte rogné au ras des lettres est mal détecté), et les
+  mots d'une même ligne sont regroupés même espacés. Reste : un « I » collé au mot suivant
+  dans un italique serré (« IDON'T ») — à corriger par GPT-4.1 en phase 3. Les modèles « medium » ne lisent pas
+  mieux et prennent 15 à 20 s par case. Piste : la version GPU de Paddle sur la RTX 3050.
+  Commande : `python -m manhwa ocr-bench <chapitre>` (référence dans `.studio/ocr_gold.json`).
+- **Essai d'un routage Windows → Paddle** (Windows d'abord, Paddle seulement si le texte
+  lu contient un mot inconnu/rare, un chiffre collé à des lettres ou rien) : abandonné.
+  Windows ne règle seul que 26 frames sur 142 (les autres sont difficiles ou sans texte),
+  donc aucun gain de temps (2,2 s/frame contre 2,1) ; et ses erreurs sont souvent
+  silencieuses (mots sautés, « ME'S » pour « HE'S ») : aucun contrôle ne les voit.
+  **À garder pour l'écran « Texte douteux »** : faire tourner Windows *en plus* de Paddle
+  (+0,08 s/case) et signaler les cases où les deux ne sont pas d'accord, plus les mots
+  absents du dictionnaire (« IDON'T »). Pour la vitesse : Paddle sur la carte graphique.
 - Pour chaque bulle : texte, position, note de confiance, type probable (dialogue /
   SFX). Les SFX ne sont plus jetés : ils servent aux bruitages.
 
@@ -158,7 +182,7 @@ l'automatique (« le matching a raison 87 % du temps »).
 |---|---|---|
 | 0 | ✅ **Remise à plat** : bugs V1, structure `manhwa/`, venv, `.env`, `config.toml`, `project.json`, scraper corrigé vers `inbox/` | Un chapitre téléchargé arrive dans `inbox/` et en ressort en vidéo V1 (validé : Myst Might Mayhem ch. 1) |
 | 1 | ✅ **Studio de base** (style, séries/épisodes, progression) + découpe auto + écran Découpe | Un chapitre découpé en quelques clics (Myst Might Mayhem ch. 1 : 141 cases proposées, 6 endroits à vérifier) |
-| 2 | **OCR local** (détection des bulles + banc d'essai PaddleOCR / OCR Windows) + repérage des SFX + écrans Texte douteux et Type de bulle | Plus aucune bulle oubliée ni à retaper |
+| 2 | 🟡 **OCR local** : ✅ banc d'essai (PaddleOCR retenu), ✅ regroupement en bulles + ordre de lecture, ✅ repérage des SFX / filigranes / crédits, ✅ texte lu affiché sous l'aperçu du Studio · ⬜ écrans Texte douteux et Type de bulle | Plus aucune bulle oubliée ni à retaper |
 | 3 | **Bible (wiki) + visages + GPT-4.1 + novel** + écran Qui parle | Toutes les répliques attribuées en cliquant sur des têtes |
 | 4 | **Voix multiples + sous-titres karaoké** + écran Voix | Narrateur + une voix par perso, réglées une fois |
 | 5 | **Rendu final** + **bruitages** + écran Vidéo | Un MP4 publiable, < 2 min de travail humain |
