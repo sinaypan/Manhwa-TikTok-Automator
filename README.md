@@ -24,6 +24,10 @@ Sinon, indique son chemin dans `config.toml` → `[ocr] tesseract_cmd`.
 Copie `.env.example` en `.env` pour les clés d'API (utilisées à partir de la phase 3).
 `.env` n'est jamais commité.
 
+**Carte graphique NVIDIA** (facultatif) : la lecture du texte devient environ 26× plus
+rapide (0,07 s par case au lieu de 1,7 s sur une RTX 3050). Voir
+[requirements-gpu.txt](requirements-gpu.txt) ; `[ocr] device = "auto"` la prend toute seule.
+
 ## Utilisation
 
 Toutes les commandes s'écrivent `.venv\Scripts\python -m manhwa <commande>`.
@@ -70,6 +74,20 @@ Les lignes en pointillés et les badges orange (case très haute) sont les endro
 vérifier ; « Tout est bon » les valide d'un coup. **Créer la vidéo** lance frames →
 texte → voix → rendu en arrière-plan, et la vidéo s'affiche dans le Studio à la fin.
 
+**Ajouter des chapitres** (en haut à gauche) : colle le lien de la série et les chapitres
+voulus ; le Studio télécharge, découpe, lit le texte, cherche les personnages, fait relire
+par GPT, choisit les voix et les sons, puis crée la vidéo, tout seul. Si le site demande
+une vérification, une fenêtre de navigateur s'ouvre : passe-la, la suite continue.
+Sur un chapitre déjà là, **Tout faire** lance les mêmes étapes. Sans clé GPT, les étapes
+GPT sont simplement sautées.
+
+#### Onglet Vidéo
+
+La vidéo, et à côté la case en cours (qui parle, avec quelle voix, quel son). Un passage
+cloche ? Un clic sur la raison (mauvaise voix, texte faux, mauvais son, découpe) au bon
+moment. La liste des passages signalés permet de revoir chacun et **Corriger** ouvre
+l'onglet qu'il faut, sur la bonne case.
+
 #### Onglet Personnages
 
 Une fois la vidéo créée, l'onglet **Personnages** cherche tout seul les visages dans les
@@ -88,7 +106,10 @@ modèles (≈ 90 Mo) sont téléchargés au premier usage dans `.cache/models/`.
 | « Valider les N propositions » | Accepter d'un coup le personnage proposé (en pointillés) |
 
 Le personnage proposé est celui dont le visage est le plus proche de la bulle ; sans
-visage dans la case, celui des cases voisines.
+visage dans la case, celui des cases voisines. Un personnage secondaire sans groupe ?
+« Autre… » → **Figurant** (voix d'homme ou de femme, réglables dans la carte Figurants) ou
+**+ Nouveau personnage…** (il garde son nom pour la série). Si tu choisis quelqu'un d'autre
+que le visage encadré, le Studio propose de corriger ce visage (toutes les répliques suivent).
 
 **Wiki** : « Noms depuis le wiki » lit le wiki Fandom de la série (trouvé d'après son
 nom) : noms, genre, cheveux, chapitre d'apparition et caractère, sans les passages
@@ -144,6 +165,47 @@ Pour comparer les moteurs sur un chapitre, mets une référence lue à la main d
 | `O` | Tester l'OCR sur le cadre |
 | `H` | Afficher/masquer l'aide |
 | `Q` / `Échap` | Terminer |
+
+#### Voix
+
+Chaque personnage a sa voix (edge-tts) : **Proposer les voix** laisse GPT-4.1 la choisir
+d'après son genre, son caractère (wiki) et ses répliques ; ▶ pour écouter, la liste pour
+changer, − / + pour une voix plus grave ou plus aiguë, **Valider**. Le narrateur lit les
+encadrés de narration et les répliques sans personnage. Chaque réplique est lue avec la
+voix de son personnage (validé, sinon proposé) et son ton : « en colère » parle plus fort
+et plus vite, « triste » plus bas et plus lentement…
+
+#### Onglet Relecture (GPT-4.1)
+
+**Relire le chapitre** : GPT corrige les erreurs de lecture (« IDON'T THINK CAN » →
+« I DON'T THINK I CAN »), dit si une bulle est une réplique, une pensée, de la narration ou
+un bruitage, propose qui parle et note le ton de chaque réplique. Rien ne change sans ton
+accord (Accepter / Refuser, ou tout d'un coup), sauf le ton, modifiable sur chaque
+réplique de l'onglet Personnages. Environ 3 minutes pour un chapitre.
+
+#### Onglet Sons
+
+Chaque bruitage repéré (SFX) peut recevoir un son : clic sur une catégorie (coup de poing,
+verre brisé, bois, lame, explosion, whoosh, pas, porte, magie…) pour l'écouter et la
+choisir, ou « Aucun ». Les sons viennent de packs libres (CC0) de [Kenney](https://kenney.nl),
+téléchargés au premier usage ; tes propres sons se rangent dans `sfx/<catégorie>/`.
+Le son part au début de sa case, sous la voix.
+
+La **musique de fond** est le premier fichier du dossier `music/` (une nappe d'ambiance
+générée y est mise par défaut : remplace-la par le MP3 de ton choix). Elle baisse quand on
+parle. Au rendu, une case plus haute que l'écran défile en pleine largeur, les autres
+zooment très légèrement, et chaque case pousse la précédente vers le haut comme un
+webtoon qu'on fait défiler (`[render]` dans config.toml : `zoom`, `pan`, `transition`,
+`music_volume`…).
+
+Les **cases sans texte** (un coup, des pas, une porte…) peuvent aussi avoir un son :
+« Proposer avec GPT » le devine d'après les répliques autour, tu acceptes ou tu changes.
+
+#### Clé GPT
+
+La roue dentée en haut à gauche ouvre les **Réglages** : adresse du proxy, modèle et clé,
+enregistrés dans `.env` (jamais commité). La clé change chaque jour : colle la nouvelle
+ici, « Enregistrer et tester » vérifie qu'elle marche.
 
 ## Dossier d'un chapitre
 

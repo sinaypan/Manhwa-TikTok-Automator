@@ -17,14 +17,16 @@ DEFAULTS = {
         "jpeg_quality": 92,
     },
     "output": {"width": 1080, "height": 1920},
-    "ocr": {"engine": "paddle", "tesseract_cmd": "", "lang": "eng", "psm": 6},
+    "ocr": {"engine": "paddle", "device": "auto", "tesseract_cmd": "", "lang": "eng", "psm": 6},
     "tts": {
         "voice": "en-US-ChristopherNeural",
         "rate": "+0%",
         "volume": "+0%",
         "concurrency": 4,
     },
-    "render": {"speed": 1.0, "fps": 24, "padding_seconds": 0.2, "silent_frame_seconds": 2.0},
+    "render": {"speed": 1.0, "fps": 24, "padding_seconds": 0.2, "silent_frame_seconds": 2.0,
+               "zoom": 0.04, "pan": True, "music": "", "music_volume": 0.16, "music_duck": 0.4,
+               "transition": "slide", "transition_seconds": 0.3},
     "scraper": {
         "headless": False,
         "workers": 5,

@@ -1,31 +1,79 @@
-"""Assemblage vidéo (V1) : chaque frame dure le temps de sa voix.
+"""Assemblage vidéo : chaque frame dure le temps de ses répliques, avec un peu de mouvement.
 
-Temporaire : remplacé par le rendu ffmpeg (défilement, sous-titres, musique) en phase 5.
+    - une case plus haute que l'écran défile de haut en bas, en pleine largeur (au lieu
+      d'être réduite au milieu d'un fond flou) ;
+    - les autres frames zooment très légèrement (avant, arrière, en alternance) ;
+    - passage d'une frame à l'autre : la nouvelle pousse l'ancienne vers le haut, comme un
+      webtoon qu'on fait défiler (ou un fondu : [render] transition = "fade") ;
+    - les bruitages choisis (manhwa/sfx.py) partent au début de leur case, sous la voix ;
+    - une musique de fond (fichier dans music/ ou [render] music) tourne en boucle et
+      baisse pendant que les personnages parlent.
 """
+import math
 import os
 
+from manhwa.config import ROOT
 from manhwa.project import fingerprint
+
+GAP_SECONDS = 0.15     # blanc entre deux répliques d'une même frame
+TALL = 16 / 9 * 1.08   # une case plus haute que ça (hauteur / largeur) défile au lieu d'être réduite
+MUSIC_EXT = (".mp3", ".ogg", ".wav", ".m4a")
+
+
+def music_file(cfg):
+    """La musique de fond : [render] music, sinon le premier fichier de music/ (à la racine)."""
+    chosen = (cfg["render"].get("music") or "").strip()
+    if chosen:
+        path = (ROOT / chosen) if not os.path.isabs(chosen) else chosen
+        return str(path) if os.path.isfile(path) else None
+    folder = ROOT / "music"
+    if folder.is_dir():
+        tracks = sorted(p for p in folder.iterdir() if p.suffix.lower() in MUSIC_EXT)
+        if tracks:
+            return str(tracks[0])
+    return None
 
 
 def render_key(chapter, data, cfg):
+    from manhwa.sfx import frame_sounds
+
+    sounds = frame_sounds(data)
     parts = []
     for frame in data["frames"]:
         img = chapter.frames_dir / frame["file"]
         stat = img.stat() if img.is_file() else None
-        parts.append([frame["file"], stat and stat.st_size, stat and stat.st_mtime_ns, frame.get("audio_key")])
-    return fingerprint(parts, cfg["render"], cfg["output"])
+        voices = [seg.get("audio_key") for seg in frame.get("segments") or []] or frame.get("audio_key")
+        parts.append([frame["file"], frame.get("crop"), stat and stat.st_size, stat and stat.st_mtime_ns, voices,
+                      [os.path.basename(s) for s in sounds.get(frame["file"], [])]])
+    music = music_file(cfg)
+    return fingerprint(parts, cfg["render"], cfg["output"], music and os.path.getsize(music))
 
 
 def _load_audio(path):
     from moviepy import AudioFileClip
 
-    if not path.is_file() or path.stat().st_size <= 100:
+    if not os.path.isfile(path) or os.path.getsize(path) <= 100:
         return None
     try:
         return AudioFileClip(str(path))
     except Exception:
-        print(f"  [!] Audio illisible ignoré : {path.name}")
+        print(f"  [!] Audio illisible ignoré : {os.path.basename(path)}")
         return None
+
+
+def _silence(duration, like):
+    """Un blanc du même format que `like` (les mp3 d'edge-tts sont lus en stéréo)."""
+    import numpy as np
+    from moviepy import AudioClip
+
+    channels = getattr(like, "nchannels", 1) or 1
+
+    def frame(t):
+        n = len(t) if hasattr(t, "__len__") else 1
+        out = np.zeros((n, channels))
+        return out if hasattr(t, "__len__") else out[0]
+
+    return AudioClip(frame, duration=duration, fps=like.fps)
 
 
 def _progress_logger(progress):
@@ -42,6 +90,124 @@ def _progress_logger(progress):
     return Logger()
 
 
+# ---------- Mouvement ----------
+
+def _ease(x):
+    x = min(1.0, max(0.0, x))
+    return x * x * (3 - 2 * x)
+
+
+def zoom_clip(image, duration, amount, zoom_in=True):
+    """La frame qui grossit (ou rapetisse) de `amount` (0.04 = 4 %) sur sa durée."""
+    import cv2
+    from moviepy import VideoClip
+
+    h, w = image.shape[:2]
+
+    def frame(t):
+        p = _ease(t / duration) if duration else 0
+        s = 1 + amount * (p if zoom_in else 1 - p)
+        ch, cw = round(h / s), round(w / s)
+        y0, x0 = (h - ch) // 2, (w - cw) // 2
+        return cv2.resize(image[y0:y0 + ch, x0:x0 + cw], (w, h), interpolation=cv2.INTER_LINEAR)
+
+    return VideoClip(frame, duration=duration)
+
+
+def pan_clip(tall, out_h, duration):
+    """Une case haute, en pleine largeur, qui défile du haut vers le bas (pause au début et à la fin)."""
+    from moviepy import VideoClip
+
+    travel = tall.shape[0] - out_h
+
+    def frame(t):
+        p = _ease((t / duration - 0.12) / 0.76) if duration else 0
+        y = round(travel * p)
+        return tall[y:y + out_h]
+
+    return VideoClip(frame, duration=duration)
+
+
+def timeline(clips, durations, kind="slide", seconds=0.3):
+    """Les frames bout à bout, avec une transition au début de chacune (sans allonger la vidéo).
+
+    On ne passe pas par concatenate_videoclips : chaque image se calcule à la demande,
+    la transition mélange la dernière image de la frame d'avant et le début de la suivante.
+    """
+    import bisect
+
+    import numpy as np
+    from moviepy import VideoClip
+
+    starts = [0.0]
+    for d in durations[:-1]:
+        starts.append(starts[-1] + d)
+    total = starts[-1] + durations[-1]
+    last = {}
+
+    def end_of(i):
+        if i not in last:
+            last[i] = clips[i].get_frame(max(0.0, durations[i] - 1e-3))
+        return last[i]
+
+    def frame(t):
+        i = min(len(clips) - 1, max(0, bisect.bisect_right(starts, t) - 1))
+        local = t - starts[i]
+        cur = clips[i].get_frame(min(local, durations[i] - 1e-3))
+        span = min(seconds, 0.4 * durations[i])
+        if kind == "none" or i == 0 or local >= span:
+            return cur
+        p = _ease(local / span)
+        prev = end_of(i - 1)
+        if kind == "fade":
+            return (prev * (1 - p) + cur * p).astype(np.uint8)
+        cut = round(p * cur.shape[0])  # « slide » : l'ancienne monte, la nouvelle arrive par le bas
+        return np.vstack([prev[cut:], cur[:cut]]) if cut else prev
+
+    return VideoClip(frame, duration=total), starts
+
+
+def _tall_image(strip, crop, out_w):
+    """La case découpée dans le chapitre, mise à la largeur de la vidéo (None si elle n'est pas haute)."""
+    import cv2
+
+    x, y, w, h = crop
+    if strip is None or w <= 0 or h / w <= TALL:
+        return None
+    part = strip[y:y + h, x:x + w]
+    new_h = round(h * out_w / w)
+    return cv2.cvtColor(cv2.resize(part, (out_w, new_h), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
+
+
+# ---------- Son ----------
+
+def _music_track(path, durations, voiced, r):
+    """La musique en boucle, plus forte sur les cases sans voix, plus basse sous les voix."""
+    import numpy as np
+    from moviepy.audio.fx import AudioFadeIn, AudioFadeOut, AudioLoop
+
+    music = _load_audio(path)
+    if music is None:
+        return None
+    total = sum(durations)
+    ends = np.cumsum(durations)
+    loud = float(r.get("music_volume", 0.16))
+    quiet = loud * float(r.get("music_duck", 0.4))
+    levels = np.array([quiet if v else loud for v in voiced])
+
+    def envelope(t):
+        k = np.minimum(np.searchsorted(ends, t, side="right"), len(levels) - 1)
+        return levels[k]
+
+    def duck(get_frame, t):
+        out = get_frame(t)
+        env = envelope(np.atleast_1d(t))
+        return out * (env[:, None] if np.ndim(out) == 2 else env[0])
+
+    track = music.with_effects([AudioLoop(duration=total)]).transform(duck, keep_duration=True)
+    return track.with_effects([AudioFadeIn(1.5), AudioFadeOut(2.5)])
+
+
 def run_render(chapter, cfg, force=False, progress=None):
     data = chapter.load()
     if not data["frames"]:
@@ -53,44 +219,95 @@ def run_render(chapter, cfg, force=False, progress=None):
         print(f"  Vidéo déjà à jour : {chapter.video_path.name}")
         return False
 
-    from moviepy import ImageClip, concatenate_videoclips
+    import cv2
+    from moviepy import CompositeAudioClip, concatenate_audioclips
+
+    from manhwa.images import load_strip, read_image
+    from manhwa.sfx import VOLUME, ensure_library, frame_sounds
 
     r = cfg["render"]
-    speed = float(r.get("speed", 1.0))  # la voix est déjà accélérée (tts.voice_rate) : on raccourcit les blancs
-    clips, audios = [], []
-    for frame in data["frames"]:
-        img = chapter.frames_dir / frame["file"]
-        if not img.is_file():
+    out_w, out_h = cfg["output"]["width"], cfg["output"]["height"]
+    speed = float(r.get("speed", 1.0))  # la voix est déjà accélérée (tts) : on raccourcit les blancs
+    zoom = float(r.get("zoom", 0.04))
+    pan = bool(r.get("pan", True))
+    sounds = {}
+    try:
+        ensure_library()
+        sounds = frame_sounds(data)
+    except Exception as e:
+        print(f"  [!] Bruitages indisponibles ({e}) : vidéo sans bruitages")
+    strip = None
+    if pan and any(f["crop"][3] / max(1, f["crop"][2]) > TALL for f in data["frames"]):
+        strip, _ = load_strip(chapter.pages(), cfg["slicer"]["max_src_width"])
+
+    clips, audios, opened, durations, voiced, files = [], [], [], [], [], []
+    for i, frame in enumerate(data["frames"]):
+        img_path = chapter.frames_dir / frame["file"]
+        image = read_image(img_path)
+        if image is None:
             print(f"  [!] Frame manquante ignorée : {frame['file']}")
             continue
-        audio = _load_audio(chapter.root / frame["audio"]) if frame.get("audio") else None
-        if audio:
-            audios.append(audio)
-            clip = ImageClip(str(img)).with_duration(audio.duration + r["padding_seconds"] / speed).with_audio(audio)
+        # les répliques de la frame l'une après l'autre (une voix par personnage), un court blanc entre deux
+        pieces = [a for a in (_load_audio(chapter.root / seg["audio"]) for seg in frame.get("segments") or []) if a]
+        if not pieces and frame.get("audio"):  # frame d'avant les voix par personnage
+            pieces = [a for a in [_load_audio(chapter.root / frame["audio"])] if a]
+        opened += pieces
+        voice = None
+        if pieces:
+            gap = _silence(GAP_SECONDS / speed, pieces[0])
+            joined = [x for a in pieces for x in (a, gap)][:-1]
+            voice = concatenate_audioclips(joined) if len(joined) > 1 else pieces[0]
+        duration = voice.duration + r["padding_seconds"] / speed if voice else r["silent_frame_seconds"] / speed
+
+        hits = [a for a in (_load_audio(p) for p in sounds.get(frame["file"], [])) if a]
+        opened += hits
+        if hits and not voice:
+            duration = max(duration, min(3.0, max(h.duration for h in hits) + 0.2))
+        layers = ([voice] if voice else []) + [h.with_start(0.05 + 0.25 * k).with_volume_scaled(VOLUME) for k, h in enumerate(hits)]
+        audio = CompositeAudioClip(layers).with_duration(duration) if layers else None
+
+        tall = _tall_image(strip, frame["crop"], out_w) if pan else None
+        if tall is not None and tall.shape[0] > out_h:
+            clip = pan_clip(tall, out_h, duration)
         else:
-            clip = ImageClip(str(img)).with_duration(r["silent_frame_seconds"] / speed)
+            rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            clip = zoom_clip(rgb, duration, zoom, zoom_in=i % 2 == 0) if zoom > 0 else zoom_clip(rgb, duration, 0)
         clips.append(clip)
+        audios.append(audio)
+        durations.append(duration)
+        voiced.append(bool(voice))
+        files.append(frame["file"])
 
     if not clips:
         print("  Rien à assembler.")
         return False
 
     tmp = chapter.root / "video.part.mp4"
-    print(f"  Rendu de {len(clips)} frames...")
+    print(f"  Rendu de {len(clips)} frames ({sum(durations) / 60:.1f} min)...")
     try:
-        # toutes les frames font la même taille (1080×1920) : "chain" suffit et est ~18× plus
-        # rapide que "compose" (mesuré : 213 contre 12 images/s)
-        final = concatenate_videoclips(clips, method="chain")
+        final, starts = timeline(clips, durations, r.get("transition", "slide"), float(r.get("transition_seconds", 0.3)))
+        path = music_file(cfg)
+        music = _music_track(path, durations, voiced, r) if path else None
+        if music is not None:
+            opened.append(music)
+        layers = [a.with_start(t) for a, t in zip(audios, starts) if a is not None] + ([music] if music is not None else [])
+        if layers:
+            final = final.with_audio(CompositeAudioClip(layers).with_duration(final.duration))
         final.write_videofile(str(tmp), fps=r["fps"], codec="libx264", audio_codec="aac",
                               preset="ultrafast", threads=4,
                               logger=_progress_logger(progress) if progress else "bar")
         final.close()
     finally:
-        for c in clips + audios:
-            c.close()
+        for c in clips + opened:
+            try:
+                c.close()
+            except Exception:
+                pass
     os.replace(tmp, chapter.video_path)
 
-    data["steps"]["render"] = {"key": key}
+    data = chapter.load()  # relu : on a pu valider des choses dans le Studio pendant le rendu
+    # où commence chaque frame dans la vidéo (onglet Vidéo : signaler un passage)
+    data["steps"]["render"] = {"key": key, "timeline": [[f, round(t, 3), round(d, 3)] for f, t, d in zip(files, starts, durations)]}
     chapter.save(data)
     print(f"  Vidéo : {chapter.video_path}")
     return True

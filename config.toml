@@ -19,6 +19,7 @@ height = 1920
 
 [ocr]
 engine = "paddle"         # "paddle" (le plus juste) | "windows" (30× plus rapide, se trompe sur le texte stylisé) | "tesseract"
+device = "auto"           # PaddleOCR : "auto" = carte graphique si paddlepaddle-gpu est installé (26× plus rapide), "gpu" ou "cpu"
 tesseract_cmd = ""        # vide = cherche tesseract dans le PATH puis à l'emplacement Windows par défaut
 lang = "eng"
 psm = 6
@@ -34,6 +35,13 @@ speed = 1.25              # rythme de la vidéo : voix 25 % plus rapide, blancs 
 fps = 24
 padding_seconds = 0.2      # silence ajouté après chaque réplique
 silent_frame_seconds = 2.0 # durée d'une frame sans texte
+zoom = 0.04               # léger zoom sur chaque frame (0 = image fixe)
+pan = true                # une case plus haute que l'écran défile au lieu d'être réduite
+music = ""                # musique de fond ; vide = le premier fichier du dossier music/
+music_volume = 0.16       # volume de la musique quand personne ne parle
+music_duck = 0.4          # sous les voix, la musique descend à 40 % de ce volume
+transition = "slide"      # passage d'une frame à l'autre : "slide" (défilement), "fade" ou "none"
+transition_seconds = 0.3
 
 [scraper]
 headless = false           # false : la fenêtre s'affiche (nécessaire pour passer Cloudflare à la main)

@@ -17,11 +17,29 @@ const KIND_STEPS = {
     ['wiki_faces', 'Visages du wiki'],
   ],
 };
-const KIND_TITLES = { faces: 'Recherche des personnages', wiki: 'Lecture du wiki', wiki_images: 'Images du wiki' };
+KIND_STEPS.review = [['review', 'Relecture GPT']];
+KIND_STEPS.voices = [['voices', 'Choix des voix']];
+KIND_STEPS.sounds = [['sounds', 'Sons des cases sans texte']];
+const AUTO_STEPS = [
+  ['frames', 'Frames 9:16'],
+  ['ocr', 'Lecture du texte'],
+  ['faces', 'Visages'],
+  ['wiki', 'Wiki'],
+  ['review', 'Relecture GPT'],
+  ['voices', 'Choix des voix'],
+  ['sounds', 'Sons'],
+  ['tts', 'Voix'],
+  ['render', 'Rendu vidéo'],
+];
+const KIND_TITLES = { auto: 'Tout faire', faces: 'Recherche des personnages', wiki: 'Lecture du wiki', wiki_images: 'Images du wiki', review: 'Relecture par GPT', voices: 'Choix des voix par GPT', sounds: 'Sons proposés par GPT' };
 const SCREENS = [
   ['cut', 'Découpe'],
   ['cast', 'Personnages'],
+  ['review', 'Relecture'],
+  ['sounds', 'Sons'],
+  ['video', 'Vidéo'],
 ];
+const SCREEN_HASH = { cast: 'personnages', review: 'relecture', sounds: 'sons', video: 'video' };
 const TALL_DOUBT = 2; // une case de plus de 2 écrans cache sans doute une coupe
 
 const ICONS = {
@@ -32,6 +50,7 @@ const ICONS = {
   alert: 'M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01',
   down: 'M12 5v14M19 12l-7 7-7-7',
   scissors: 'M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12',
+  gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
   inbox: 'M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z',
   users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
   plus: 'M12 5v14M5 12h14',
@@ -41,6 +60,8 @@ const ICONS = {
 /* ---------- Outils ---------- */
 
 const $ = (sel, root = document) => root.querySelector(sel);
+// replaceChildren écrit « null » pour un enfant vide : on les retire d'abord
+const fill = (node, ...children) => node.replaceChildren(...children.flat().filter((c) => c != null && c !== false));
 const enc = encodeURIComponent;
 const fmt = (n) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1 });
 const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
@@ -121,6 +142,7 @@ function renderLibrary() {
   const episodes = lib.series.reduce((n, s) => n + s.chapters.length, 0);
   $('#brand-sub').textContent = episodes ? `${plural(lib.series.length, 'série', 'séries')} · ${plural(episodes, 'épisode', 'épisodes')}` : 'Inbox vide';
   nav.replaceChildren(
+    ...[el('button', { type: 'button', class: 'add-btn', onclick: openImport }, icon('plus'), 'Ajouter des chapitres'), importCard()].filter(Boolean),
     ...lib.series.map((s) =>
       el(
         'section',
@@ -186,13 +208,15 @@ function renderHome() {
 /* ---------- Chapitre : écran Découpe ---------- */
 
 function setHash() {
-  history.replaceState(null, '', `#${enc(state.current)}${state.screen === 'cast' ? '/personnages' : ''}`);
+  const suffix = SCREEN_HASH[state.screen];
+  history.replaceState(null, '', `#${enc(state.current)}${suffix ? `/${suffix}` : ''}`);
 }
 
 function parseHash() {
-  // « #Série%2Fchapter-001 » ou « #Série%2Fchapter-001/personnages »
-  const [raw, screen] = location.hash.slice(1).split('/');
-  return { id: decodeURIComponent(raw || ''), screen: screen === 'personnages' ? 'cast' : 'cut' };
+  // « #Série%2Fchapter-001 », « …/personnages » ou « …/relecture »
+  const [raw, suffix] = location.hash.slice(1).split('/');
+  const screen = Object.keys(SCREEN_HASH).find((k) => SCREEN_HASH[k] === suffix) || 'cut';
+  return { id: decodeURIComponent(raw || ''), screen };
 }
 
 async function openChapter(id, screen = 'cut') {
@@ -206,6 +230,9 @@ async function openChapter(id, screen = 'cut') {
     if (state.current !== id) return;
     loadChapter(ch);
     if (state.screen === 'cast') openCast();
+    else if (state.screen === 'review') openReview();
+    else if (state.screen === 'sounds') openSounds();
+    else if (state.screen === 'video') openVideo();
     else renderChapter(true);
     $('main').scrollTop = 0;
   } catch (e) {
@@ -285,8 +312,15 @@ function switchScreen(screen) {
   state.screen = screen;
   setHash();
   $('#hint').hidden = true;
+  hidePeek();
   if (screen === 'cast') openCast();
-  else renderChapter(false);
+  else if (screen === 'review') openReview();
+  else if (screen === 'sounds') openSounds();
+  else if (screen === 'video') openVideo();
+  else {
+    renderChapter(false);
+    focusFrameRow();
+  }
   $('main').scrollTop = 0;
 }
 
@@ -297,6 +331,40 @@ function renderHead() {
   const job = findEpisode(ch.id)?.job || ch.job;
   const running = isRunning(job);
   const title = el('h2', { text: `${ch.series} · ${ch.name.replace('chapter-', 'Épisode ')}` });
+  if (state.screen === 'video') {
+    const v = state.videoInfo;
+    const todo = v ? v.flags.filter((f) => !f.done).length : 0;
+    head.replaceChildren(
+      el('div', { class: 'titles' }, title, el('p', { text: v ? `${plural(v.timeline.length, 'case', 'cases')} · ${todo} passage${todo > 1 ? 's' : ''} à corriger` : 'Vidéo' })),
+      screenTabs(),
+      el('div', { class: 'actions' }, el('button', { type: 'button', class: 'pill accent', disabled: running, onclick: makeVideo }, running ? el('span', { class: 'spinner light' }) : icon('play'), running ? 'En cours…' : 'Créer la vidéo')),
+    );
+    return;
+  }
+  if (state.screen === 'sounds') {
+    const s = state.sounds;
+    const set = s ? s.spots.filter((x) => x.sound !== s.none).length : 0;
+    head.replaceChildren(
+      el('div', { class: 'titles' }, title, el('p', { text: s ? `${plural(s.spots.length, 'bruitage', 'bruitages')} · ${set} avec un son` : 'Sons' })),
+      screenTabs(),
+      el('div', { class: 'actions' }, el('button', { type: 'button', class: 'pill accent', disabled: running, onclick: makeVideo }, running ? el('span', { class: 'spinner light' }) : icon('play'), running ? 'En cours…' : 'Créer la vidéo')),
+    );
+    return;
+  }
+  if (state.screen === 'review') {
+    const r = state.review;
+    const pending = r ? r.items.filter((x) => x.state === 'pending').length : 0;
+    head.replaceChildren(
+      el('div', { class: 'titles' }, title, el('p', { text: r ? (r.done ? `${plural(r.items.length, 'proposition', 'propositions')} de GPT · ${pending} à décider` : 'Pas encore relu par GPT') : 'Relecture' })),
+      screenTabs(),
+      el(
+        'div',
+        { class: 'actions' },
+        r?.done ? el('button', { type: 'button', class: 'pill', disabled: running, title: 'Relire tout le chapitre (tes décisions sont gardées)', onclick: runReview }, running ? el('span', { class: 'spinner' }) : icon('reset'), 'Relire à nouveau') : null,
+      ),
+    );
+    return;
+  }
   if (state.screen === 'cast') {
     const c = state.cast;
     const named = c ? c.characters.filter((x) => x.faces.length).length : 0;
@@ -327,6 +395,7 @@ function renderHead() {
       n ? el('button', { type: 'button', class: 'pill warn', onclick: nextDoubt }, icon('down'), `${n} à vérifier`) : null,
       el('button', { type: 'button', class: 'pill', title: 'Revenir à la découpe automatique', onclick: resetCuts }, icon('reset'), 'Auto'),
       el('button', { type: 'button', class: 'pill', title: 'Comment ça marche', 'aria-label': 'Comment ça marche', onclick: () => { state.introOpen = true; renderSide(); $('#side').scrollTop = 0; } }, '?'),
+      el('button', { type: 'button', class: 'pill', disabled: running, title: 'Tout d’un coup : visages, relecture GPT, voix, sons, puis la vidéo', onclick: runAuto }, icon('sparkles'), 'Tout faire'),
       el('button', { type: 'button', class: 'pill accent', disabled: running, onclick: makeVideo }, running ? el('span', { class: 'spinner light' }) : icon('play'), running ? 'En cours…' : 'Créer la vidéo'),
     ),
   );
@@ -492,7 +561,7 @@ function counted(job) {
 }
 
 function jobCard(job) {
-  const steps = KIND_STEPS[job.kind] || JOB_STEPS;
+  const steps = job.kind === 'auto' ? AUTO_STEPS : KIND_STEPS[job.kind] || JOB_STEPS;
   const at = steps.findIndex(([step]) => step === job.step);
   const title = job.status === 'error' ? 'Erreur' : job.status === 'queued' ? 'En attente…' : KIND_TITLES[job.kind] || 'Création de la vidéo';
   const detail =
@@ -506,6 +575,7 @@ function jobCard(job) {
     detail ? el('p', { class: 'job-progress', text: detail }) : null,
     job.progress != null && job.status === 'running' ? el('div', { class: 'bar' }, el('span', { style: `width:${job.progress * 100}%` })) : null,
     job.error ? el('p', { class: 'muted', style: 'margin-top:6px', text: job.error }) : null,
+    (job.warnings || []).length ? el('p', { class: 'muted', style: 'margin-top:6px', text: `Sauté : ${job.warnings.join(' · ')}` }) : null,
     job.step === 'wiki_images' && job.status === 'running'
       ? el('p', { class: 'notice-inline' }, icon('alert'), 'Une fenêtre de navigateur s’est ouverte : si Cloudflare demande une vérification, passe-la dedans. La suite se fait toute seule.')
       : null,
@@ -807,6 +877,7 @@ const faceSrc = (f) => `/api/face?id=${enc(state.chapter.id)}&f=${enc(f)}`;
 
 function charLabel(cid) {
   if (cid === state.cast?.narrator) return 'Narrateur';
+  if (state.cast?.extras?.[cid]) return state.cast.extras[cid].label;
   const list = state.cast?.characters || [];
   const i = list.findIndex((c) => c.id === cid);
   if (i < 0) return '?';
@@ -815,6 +886,7 @@ function charLabel(cid) {
 
 function avatar(cid, size = '') {
   if (cid === state.cast.narrator) return el('span', { class: `avatar narrator ${size}` }, icon('sparkles'));
+  if (state.cast.extras?.[cid]) return el('span', { class: `avatar extra ${size}` }, icon('users'));
   const c = state.cast.characters.find((x) => x.id === cid);
   return c?.cover ? el('img', { class: `avatar ${size}`, src: faceSrc(c.cover), alt: '' }) : el('span', { class: `avatar ${size}` }, icon('users'));
 }
@@ -828,7 +900,9 @@ async function openCast() {
   try {
     const c = await api(`/api/cast?id=${enc(id)}`);
     if (state.chapter?.id !== id || state.screen !== 'cast') return;
+    if (state.focusFrame) state.lineFilter = 'all';
     setCast(c, true);
+    focusFrameRow();
   } catch (e) {
     $('#cast').replaceChildren(el('div', { class: 'notice error' }, icon('alert'), el('p', { text: `Impossible d’ouvrir les personnages : ${e.message}` })));
   }
@@ -900,9 +974,9 @@ function charsSection() {
       'div',
       { class: 'block-head row' },
       el('div', { class: 'grow' }, el('h3', { text: 'Personnages' }), el('p', { class: 'muted', text: 'Donne un nom à chaque groupe (ou clique sur un nom du wiki). Un visage mal rangé ? Clique dessus, puis sur le bon personnage dans la barre du bas.' })),
-      wikiStatus(),
+      el('div', { class: 'head-actions' }, voicesHead(), wikiStatus()),
     ),
-    el('div', { class: 'cast-grid' }, cards),
+    el('div', { class: 'cast-grid' }, narratorCard(), extrasCard(), cards),
     silent.length
       ? el(
           'div',
@@ -951,6 +1025,7 @@ function charCard(ch) {
       el('button', { type: 'button', class: 'count', title: 'Sélectionner tous ses visages', onclick: () => selectFaces(ch.faces) }, String(ch.faces.length)),
     ),
     wikiLine(ch),
+    ch.silent ? null : voiceRow(ch),
     el('div', { class: 'faces' }, ch.faces.map(faceThumb)),
     el(
       'div',
@@ -1236,6 +1311,18 @@ async function undoMove(before) {
 async function updateChar(cid, changes) {
   try {
     state.cast = await api(`/api/cast/character?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify({ char: cid, ...changes }) });
+    if ('voice' in changes || ('voice_ok' in changes && Object.keys(changes).length === 1)) {
+      // la voix change : seule cette carte est redessinée (pas les 150 répliques), et on l'écoute tout de suite
+      const i = state.cast.characters.findIndex((c) => c.id === cid);
+      const card = document.querySelector(`.who[data-char="${CSS.escape(cid)}"]`);
+      if (card && i >= 0) card.replaceWith(charCard({ ...state.cast.characters[i], i }));
+      renderHead();
+      if ('voice' in changes) {
+        const play = document.querySelector(`.who[data-char="${CSS.escape(cid)}"] .play`);
+        if (play) playSample(play, { char: cid });
+      }
+      return;
+    }
     if ('name' in changes && Object.keys(changes).length === 1) {
       // nom tapé à la main : les champs restent tels quels (on écrit peut-être déjà le suivant)
       $('#speak')?.replaceWith(linesSection());
@@ -1326,19 +1413,21 @@ function lineRow(l) {
       'div',
       { class: 'line-body' },
       el('p', { class: 'quote', text: `« ${l.text} »` }),
+      el('div', { class: 'line-meta' }, emotionSelect(l), l.kind !== 'dialogue' ? el('span', { class: 'chip', text: { thought: 'pensée', narration: 'narration' }[l.kind] || l.kind }) : null),
       el(
         'div',
         { class: 'who-chips' },
         options.map(chip),
         chip(c.narrator),
-        others.length
-          ? el(
-              'select',
-              { class: 'chip-btn', 'aria-label': 'Un autre personnage', onchange: (e) => e.target.value && setSpeaker(l, e.target.value) },
-              el('option', { value: '', text: 'Autre…' }),
-              others.map((ch) => el('option', { value: ch.id, text: charLabel(ch.id) })),
-            )
-          : null,
+        el(
+          'select',
+          { class: 'chip-btn', 'aria-label': 'Un autre personnage', onchange: (e) => pickOther(l, e.target) },
+          el('option', { value: '', text: 'Autre…' }),
+          others.length ? el('optgroup', { label: 'Personnages' }, others.map((ch) => el('option', { value: ch.id, text: charLabel(ch.id) }))) : null,
+          el('optgroup', { label: 'Personnage secondaire' },
+            Object.entries(c.extras || {}).map(([k, x]) => el('option', { value: k, text: x.label })),
+            el('option', { value: '__new', text: '+ Nouveau personnage…' })),
+        ),
       ),
     ),
   );
@@ -1360,7 +1449,45 @@ async function setSpeaker(l, cid) {
     if (fresh) document.querySelector(`.line-row[data-key="${CSS.escape(l.key)}"]`)?.replaceWith(lineRow(fresh));
     refreshSpeakHead();
     renderHead();
-    if (before !== cid && fresh) toast(`« ${l.text.slice(0, 32)}${l.text.length > 32 ? '…' : ''} » → ${cid ? charLabel(cid) : 'personne'}`, { label: 'Annuler', run: () => setSpeaker(fresh, before) });
+    const face = nearestFace(fresh || l);
+    if (face && cid && face.char !== cid && state.cast.characters.some((c) => c.id === cid)) {
+      // le visage le plus proche de la bulle porte un autre nom : c'est peut-être lui qui est mal rangé
+      toast(`Le visage encadré (« ${charLabel(face.char)} »), c’est ${charLabel(cid)} ?`, { label: 'Oui, corriger', run: () => fixFace(face.id, cid) });
+    } else if (before !== cid && fresh) toast(`« ${l.text.slice(0, 32)}${l.text.length > 32 ? '…' : ''} » → ${cid ? charLabel(cid) : 'personne'}`, { label: 'Annuler', run: () => setSpeaker(fresh, before) });
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+function nearestFace(l) {
+  if (!l?.faces?.length) return null;
+  const [bx, by] = [l.box[0] + l.box[2] / 2, l.box[1] + l.box[3] / 2];
+  const d = (f) => Math.hypot(f.box[0] + f.box[2] / 2 - bx, f.box[1] + f.box[3] / 2 - by);
+  return [...l.faces].sort((a, b) => d(a) - d(b))[0];
+}
+
+async function fixFace(faceId, cid) {
+  // range ce visage dans le bon personnage : toutes les répliques et les groupes se mettent à jour
+  state.sel = new Set([faceId]);
+  const top = $('main').scrollTop;
+  await moveFaces(cid);
+  $('main').scrollTop = top;
+}
+
+async function pickOther(l, select) {
+  const value = select.value;
+  select.value = '';
+  if (!value) return;
+  if (value !== '__new') return setSpeaker(l, value);
+  const name = prompt('Nom du personnage (il gardera son nom pour toute la série) :');
+  if (!name || !name.trim()) return;
+  try {
+    const res = await api(`/api/cast/new?id=${enc(state.chapter.id)}`, { method: 'POST', body: JSON.stringify({ name, key: l.key }) });
+    state.cast = res;
+    const top = $('main').scrollTop;
+    renderCast();
+    $('main').scrollTop = top;
+    toast(`${name.trim()} ajouté : il dit cette réplique (sa voix est choisie à la création de la vidéo, modifiable dans sa carte)`);
   } catch (e) {
     toast(`Impossible : ${e.message}`);
   }
@@ -1410,6 +1537,762 @@ async function onCastJob(before, after) {
   }
 }
 
+/* ---------- Voix des personnages ---------- */
+
+const player = new Audio();
+let playing = null; // bouton ▶ en cours
+
+function playSample(button, params) {
+  // un deuxième clic sur le même bouton arrête l'extrait
+  if (playing === button && !player.paused) {
+    player.pause();
+    button.classList.remove('on');
+    playing = null;
+    return;
+  }
+  playing?.classList.remove('on');
+  playing = button;
+  button.classList.add('on', 'loading');
+  const q = new URLSearchParams({ id: state.chapter.id, ...params });
+  player.src = `/api/voice_sample?${q}`;
+  player.play().catch(() => toast('Extrait impossible (connexion à la voix ?)')).finally(() => button.classList.remove('loading'));
+  player.onended = () => {
+    button.classList.remove('on');
+    playing = null;
+  };
+}
+
+function voiceSelect(current, onpick) {
+  const c = state.cast;
+  const groups = { Male: 'Voix d’homme', Female: 'Voix de femme' };
+  return el(
+    'select',
+    { class: 'chip-btn voice-select', 'aria-label': 'Voix', onchange: (e) => onpick(e.target.value) },
+    Object.entries(groups).map(([g, label]) =>
+      el('optgroup', { label }, c.voices.filter((v) => v.gender === g).map((v) => el('option', { value: v.name, selected: v.name === current, text: `${v.label}${v.traits ? ` · ${v.traits}` : ''}` }))),
+    ),
+  );
+}
+
+function voiceRow(ch) {
+  const v = ch.voice;
+  if (!v) return el('div', { class: 'voice-row' }, el('span', { class: 'muted', text: 'Voix : donnée à la création de la vidéo (ou « Proposer les voix »).' }));
+  const shift = (d) => updateChar(ch.id, { voice: { ...v, pitch: `${(parseInt(v.pitch, 10) || 0) + d}Hz` } });
+  const pitch = parseInt(v.pitch, 10) || 0;
+  return el(
+    'div',
+    { class: `voice-row${ch.voice_ok ? ' ok' : ''}` },
+    el('button', { type: 'button', class: 'play', title: 'Écouter une de ses répliques', 'aria-label': 'Écouter', onclick: (e) => playSample(e.currentTarget, { char: ch.id }) }, icon('play')),
+    voiceSelect(v.name, (name) => updateChar(ch.id, { voice: { ...v, name } })),
+    el('span', { class: 'pitch' },
+      el('button', { type: 'button', class: 'link quiet', title: 'Plus grave', onclick: () => shift(-3) }, '−'),
+      el('span', { class: 'muted', text: pitch ? `${pitch > 0 ? '+' : ''}${pitch} Hz` : 'hauteur' }),
+      el('button', { type: 'button', class: 'link quiet', title: 'Plus aigu', onclick: () => shift(3) }, '+')),
+    ch.voice_ok
+      ? el('span', { class: 'voice-ok' }, icon('check'), 'validée')
+      : el('button', { type: 'button', class: 'chip-btn plain proposed', title: v.reason || '', onclick: () => updateChar(ch.id, { voice_ok: true }) }, icon('check'), 'Valider'),
+    !ch.voice_ok && v.reason ? el('p', { class: 'muted voice-reason', text: `${v.by === 'gpt' ? 'GPT' : 'Auto'} : ${v.reason}` }) : null,
+  );
+}
+
+function narratorCard() {
+  const c = state.cast;
+  const v = c.narrator_voice;
+  return el(
+    'div',
+    { class: 'card who narrator-card' },
+    el('div', { class: 'who-head' }, el('span', { class: 'avatar big narrator' }, icon('sparkles')), el('div', { class: 'name static' }, el('b', { text: 'Narrateur' }), el('span', { class: 'muted', text: 'Encadrés de narration, et les répliques sans personnage' }))),
+    el(
+      'div',
+      { class: 'voice-row ok' },
+      el('button', { type: 'button', class: 'play', 'aria-label': 'Écouter', onclick: (e) => playSample(e.currentTarget, { char: c.narrator }) }, icon('play')),
+      voiceSelect(v.name, (name) => setNarrator({ ...v, name })),
+    ),
+  );
+}
+
+function extrasCard() {
+  const c = state.cast;
+  if (!c.extras) return null;
+  return el(
+    'div',
+    { class: 'card who narrator-card' },
+    el('div', { class: 'who-head' }, el('span', { class: 'avatar big extra' }, icon('users')), el('div', { class: 'name static' }, el('b', { text: 'Figurants' }), el('span', { class: 'muted', text: 'Les personnages secondaires sans groupe (« Autre… » sur une réplique)' }))),
+    Object.entries(c.extras).map(([k, x]) =>
+      el(
+        'div',
+        { class: 'voice-row ok' },
+        el('button', { type: 'button', class: 'play', 'aria-label': `Écouter ${x.label}`, onclick: (e) => playSample(e.currentTarget, { char: k }) }, icon('play')),
+        el('span', { class: 'muted', text: x.label.replace('Figurant ', '') }),
+        voiceSelect(x.voice.name, (name) => setExtra(k, { ...x.voice, name })),
+      ),
+    ),
+  );
+}
+
+async function setExtra(extra, voice) {
+  try {
+    state.cast = await api(`/api/cast/extra?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify({ extra, voice }) });
+    const card = [...document.querySelectorAll('.narrator-card')].find((n) => n.textContent.includes('Figurants'));
+    card?.replaceWith(extrasCard());
+  } catch (e) {
+    toast(`Non enregistré : ${e.message}`);
+  }
+}
+
+async function setNarrator(voice) {
+  try {
+    state.cast = await api(`/api/cast/narrator?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify({ voice }) });
+    renderCast();
+  } catch (e) {
+    toast(`Non enregistré : ${e.message}`);
+  }
+}
+
+async function proposeVoices() {
+  if (!state.cast.gpt.configured) return openSettings();
+  const id = state.chapter.id;
+  try {
+    const job = await api(`/api/cast/voices?id=${enc(id)}`, { method: 'POST' });
+    const ep = findEpisode(id);
+    if (ep) ep.job = job;
+    state.cast.job = job;
+    renderCast();
+    schedulePoll(500);
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+async function validateVoices() {
+  const todo = state.cast.characters.filter((c) => c.voice && !c.voice_ok && !c.silent && c.faces.length);
+  for (const c of todo) {
+    try {
+      state.cast = await api(`/api/cast/character?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify({ char: c.id, voice_ok: true }) });
+    } catch {}
+  }
+  renderCast();
+  toast(`${plural(todo.length, 'voix validée', 'voix validées')}`);
+}
+
+function voicesHead() {
+  const c = state.cast;
+  const pending = c.characters.filter((x) => x.voice && !x.voice_ok && !x.silent && x.faces.length).length;
+  const busy = isRunning(castJob());
+  return el(
+    'div',
+    { class: 'actions' },
+    el('button', { type: 'button', class: 'pill', disabled: busy, title: c.gpt.configured ? 'GPT choisit une voix d’après le genre et le caractère (wiki) et ses répliques' : 'Colle d’abord la clé GPT', onclick: proposeVoices }, icon('sparkles'), 'Proposer les voix'),
+    pending ? el('button', { type: 'button', class: 'pill accent', onclick: validateVoices }, icon('check'), `Valider les ${pending} voix`) : null,
+  );
+}
+
+/* ---------- Émotion d'une réplique ---------- */
+
+function emotionSelect(l) {
+  const c = state.cast;
+  return el(
+    'select',
+    { class: `chip-btn emotion${l.emotion && l.emotion !== 'neutral' ? ' set' : ''}`, title: 'Le ton de la réplique (vitesse, hauteur, volume de la voix)', 'aria-label': 'Émotion', onchange: (e) => setEmotion(l, e.target.value) },
+    Object.entries(c.emotions).map(([k, label]) => el('option', { value: k, selected: k === (l.emotion || 'neutral'), text: `Ton : ${label}` })),
+  );
+}
+
+async function setEmotion(l, emotion) {
+  try {
+    state.cast = await api(`/api/review/emotion?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify({ key: l.key, emotion }) });
+  } catch (e) {
+    toast(`Non enregistré : ${e.message}`);
+  }
+}
+
+/* ---------- Écran Relecture (propositions de GPT) ---------- */
+
+const FIELD_TITLES = {
+  text: ['Texte corrigé', 'Erreurs de lecture corrigées par GPT. La version acceptée est celle que la voix lira.'],
+  kind: ['Type de bulle', 'Réplique, pensée, narration, bruitage… La narration est lue par le narrateur ; un bruitage n’est pas lu.'],
+  speaker: ['Qui parle', 'Le personnage que GPT pense entendre, d’après la scène et les visages autour.'],
+};
+
+async function openReview() {
+  const id = state.chapter.id;
+  $('#view').replaceChildren(el('div', { class: 'head', id: 'head' }), el('div', { id: 'review' }, el('div', { class: 'skeleton short' })));
+  state.review = null;
+  renderHead();
+  try {
+    const r = await api(`/api/review?id=${enc(id)}`);
+    if (state.chapter?.id !== id || state.screen !== 'review') return;
+    state.review = r;
+    renderReview();
+    focusFrameRow();
+  } catch (e) {
+    $('#review').replaceChildren(el('div', { class: 'notice error' }, icon('alert'), el('p', { text: `Impossible d’ouvrir la relecture : ${e.message}` })));
+  }
+}
+
+const reviewJob = () => findEpisode(state.current)?.job || state.review?.job;
+
+async function runReview() {
+  if (!state.review.gpt.configured) return openSettings();
+  const id = state.chapter.id;
+  try {
+    const job = await api(`/api/review/run?id=${enc(id)}`, { method: 'POST' });
+    const ep = findEpisode(id);
+    if (ep) ep.job = job;
+    state.review.job = job;
+    renderReview();
+    schedulePoll(500);
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+function renderReview() {
+  const box = $('#review');
+  const r = state.review;
+  if (!box || !r) return;
+  renderHead();
+  const job = reviewJob();
+  const parts = [];
+  if (job?.kind === 'review' && (isRunning(job) || job.status === 'error')) parts.push(jobCard(job));
+  if (!r.gpt.configured) {
+    parts.push(el('div', { class: 'notice' }, icon('alert'), el('p', {}, 'Pas de clé GPT. ', el('button', { type: 'button', class: 'link', onclick: openSettings }, 'Colle-la ici'), ' (elle reste sur ton ordinateur, dans .env).')));
+  } else if (!r.ocr_done) {
+    parts.push(el('div', { class: 'notice' }, icon('alert'), el('p', { text: 'Crée d’abord la vidéo depuis l’onglet Découpe : GPT relit le texte lu.' })));
+  } else if (!r.done && !isRunning(job)) {
+    parts.push(
+      el('div', { class: 'card intro-card' },
+        el('h3', { text: 'Relecture par GPT' }),
+        el('p', { text: 'GPT relit tout le chapitre : il corrige les erreurs de lecture, dit si une bulle est une réplique, une pensée, de la narration ou un bruitage, propose qui parle et note le ton de chaque réplique. Rien ne change sans ton accord, sauf le ton (modifiable dans Personnages). Environ 3 minutes.' }),
+        el('button', { type: 'button', class: 'pill accent', onclick: runReview }, icon('sparkles'), 'Relire le chapitre')),
+    );
+  }
+  for (const field of ['text', 'kind', 'speaker']) {
+    const items = r.items.filter((x) => x.field === field);
+    if (!items.length) continue;
+    const pending = items.filter((x) => x.state === 'pending');
+    const order = { pending: 0, accepted: 1, rejected: 2 };
+    items.sort((a, b) => order[a.state] - order[b.state]);
+    const [title, help] = FIELD_TITLES[field];
+    parts.push(
+      el(
+        'section',
+        { class: 'cast-block' },
+        el('div', { class: 'block-head row' },
+          el('div', { class: 'grow' }, el('h3', { text: `${title} · ${items.length}` }), el('p', { class: 'muted', text: help })),
+          pending.length ? el('div', { class: 'actions' },
+            el('button', { type: 'button', class: 'pill', onclick: () => decide(pending, 'rejected') }, 'Tout refuser'),
+            el('button', { type: 'button', class: 'pill accent', onclick: () => decide(pending, 'accepted') }, icon('check'), `Tout accepter (${pending.length})`)) : null),
+        el('div', { class: 'lines' }, items.map(reviewRow)),
+      ),
+    );
+  }
+  if (r.done && !r.items.length) parts.push(el('div', { class: 'notice' }, icon('check'), el('p', { text: 'GPT n’a rien trouvé à corriger.' })));
+  box.replaceChildren(...parts);
+}
+
+function reviewRow(item) {
+  const r = state.review;
+  const [, , w] = item.crop;
+  const cy = item.box[1] + item.box[3] / 2;
+  const h = Math.min(item.crop[3], Math.round(0.55 * w));
+  const view = [0, Math.max(0, Math.min(item.crop[3] - h, Math.round(cy - h / 2))), w, h];
+  const label = (v) => (item.field === 'kind' ? r.kinds[v] || v : v ?? '—');
+  return el(
+    'div',
+    { class: `line-row review ${item.state}`, 'data-key': `${item.key}:${item.field}` },
+    el('div', { class: 'shot', style: `aspect-ratio:${view[2]}/${view[3]}`, onmouseenter: (e) => showContext(e.currentTarget, item.crop, [['bubble-box', item.box]]), onmouseleave: hidePeek },
+      el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(item.frame)}&y=${view[1]}&h=${view[3]}`, alt: '', loading: 'lazy' }),
+      el('span', { class: 'bubble-box', style: boxStyle(item.box, view) })),
+    el('div', { class: 'line-body' },
+      item.field === 'text'
+        ? el('div', { class: 'diff' }, el('p', { class: 'old', text: item.old }), el('p', { class: 'new' }, ...diffWords(item.old, item.new)))
+        : el('p', { class: 'quote' }, `« ${item.text} »`),
+      item.field !== 'text' ? el('p', { class: 'change' }, el('span', { class: 'muted', text: label(item.old) }), ' → ', el('b', { text: label(item.new) })) : null,
+      el('div', { class: 'who-chips' },
+        el('button', { type: 'button', class: `chip-btn plain${item.state === 'accepted' ? ' on' : ''}`, onclick: () => decide([item], item.state === 'accepted' ? 'pending' : 'accepted') }, icon('check'), item.state === 'accepted' ? 'Accepté' : 'Accepter'),
+        el('button', { type: 'button', class: `chip-btn plain${item.state === 'rejected' ? ' refused' : ''}`, onclick: () => decide([item], item.state === 'rejected' ? 'pending' : 'rejected') }, icon('x'), item.state === 'rejected' ? 'Refusé' : 'Refuser'))),
+  );
+}
+
+function diffWords(a, b) {
+  // les mots nouveaux en couleur : on voit tout de suite ce que GPT a changé
+  const before = new Set(String(a || '').split(/\s+/));
+  return String(b || '').split(/(\s+)/).map((w) => (w.trim() && !before.has(w) ? el('mark', { text: w }) : w));
+}
+
+async function decide(items, stateName) {
+  const id = state.chapter.id;
+  try {
+    const res = await api(`/api/review/decide?id=${enc(id)}`, { method: 'POST', body: JSON.stringify({ decisions: items.map((x) => ({ key: x.key, field: x.field, state: stateName })) }) });
+    if (state.chapter?.id !== id) return;
+    state.review = res;
+    const top = $('main').scrollTop;
+    renderReview();
+    $('main').scrollTop = top;
+    if (items.length > 1) toast(`${items.length} ${stateName === 'accepted' ? 'acceptées' : 'refusées'}`, { label: 'Annuler', run: () => decide(items, 'pending') });
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+async function onReviewJob(before, after) {
+  if (isRunning(after)) {
+    const card = $('#job-card');
+    if (card && after.kind === 'review') card.replaceWith(jobCard(after));
+    else renderReview();
+    return;
+  }
+  if (isRunning(before)) {
+    try {
+      const r = await api(`/api/review?id=${enc(state.chapter.id)}`);
+      if (state.screen === 'review') {
+        state.review = r;
+        renderReview();
+      }
+    } catch {}
+  }
+}
+
+/* ---------- Réglages : la clé GPT (change chaque jour) ---------- */
+
+async function openSettings() {
+  let s;
+  try {
+    s = (await api('/api/settings')).gpt;
+  } catch (e) {
+    return toast(`Réglages indisponibles : ${e.message}`);
+  }
+  $('#settings')?.remove();
+  const status = el('p', { class: 'muted', text: s.configured ? `Clé enregistrée : ${s.key_hint}` : 'Aucune clé enregistrée.' });
+  const base = el('input', { class: 'field', value: s.base, placeholder: 'https://…/v1', spellcheck: 'false' });
+  const model = el('input', { class: 'field', value: s.model, placeholder: 'gpt-4.1', spellcheck: 'false' });
+  const key = el('input', { class: 'field', type: 'password', placeholder: s.configured ? 'Nouvelle clé (laisser vide pour garder l’actuelle)' : 'Colle ta clé ici', autocomplete: 'off', spellcheck: 'false' });
+  const close = () => $('#settings')?.remove();
+  const save = async () => {
+    try {
+      const res = await api('/api/settings/gpt', { method: 'PUT', body: JSON.stringify({ base: base.value, model: model.value, key: key.value }) });
+      key.value = '';
+      status.textContent = `Enregistré : ${res.gpt.key_hint}. Test…`;
+      await api('/api/settings/gpt/test', { method: 'POST' });
+      status.textContent = `Clé enregistrée et testée : ${res.gpt.key_hint} ✓`;
+      if (state.cast) state.cast.gpt = res.gpt;
+      if (state.review) state.review.gpt = res.gpt;
+    } catch (e) {
+      status.textContent = e.message;
+    }
+  };
+  document.body.append(
+    el('div', { id: 'settings', class: 'modal', onclick: (e) => e.target.id === 'settings' && close() },
+      el('div', { class: 'card modal-card' },
+        el('h3', { text: 'Réglages · GPT' }),
+        el('p', { class: 'muted', text: 'Tout reste sur ton ordinateur, dans le fichier .env (jamais envoyé sur GitHub). La clé change chaque jour : colle la nouvelle ici.' }),
+        el('label', {}, 'Adresse du proxy', base),
+        el('label', {}, 'Modèle', model),
+        el('label', {}, 'Clé', key),
+        status,
+        el('div', { class: 'actions', style: 'justify-content:flex-end' },
+          el('button', { type: 'button', class: 'pill', onclick: close }, 'Fermer'),
+          el('button', { type: 'button', class: 'pill accent', onclick: save }, icon('check'), 'Enregistrer et tester')))),
+  );
+  (s.configured ? key : base.value ? key : base).focus();
+}
+
+/* ---------- Écran Sons : un son pour chaque bruitage, et la musique ---------- */
+
+async function openSounds() {
+  const id = state.chapter.id;
+  $('#view').replaceChildren(el('div', { class: 'head', id: 'head' }), el('div', { id: 'sounds' }, el('div', { class: 'skeleton short' })));
+  state.sounds = null;
+  renderHead();
+  try {
+    const s = await api(`/api/sounds?id=${enc(id)}`);
+    if (state.chapter?.id !== id || state.screen !== 'sounds') return;
+    state.sounds = s;
+    renderSounds();
+    focusFrameRow();
+  } catch (e) {
+    $('#sounds').replaceChildren(el('div', { class: 'notice error' }, icon('alert'), el('p', { text: `Impossible d’ouvrir les sons : ${e.message}` })));
+  }
+}
+
+function playUrl(button, url) {
+  if (playing === button && !player.paused) {
+    player.pause();
+    button.classList.remove('on');
+    playing = null;
+    return;
+  }
+  playing?.classList.remove('on');
+  playing = button;
+  button?.classList.add('on');
+  player.src = url;
+  player.play().catch(() => toast('Lecture impossible'));
+  player.onended = () => {
+    button?.classList.remove('on');
+    playing = null;
+  };
+}
+
+function renderSounds() {
+  const box = $('#sounds');
+  const s = state.sounds;
+  if (!box || !s) return;
+  renderHead();
+  const parts = [
+    el(
+      'div',
+      { class: 'card music-card' },
+      el('button', { type: 'button', class: 'play', 'aria-label': 'Écouter la musique', disabled: !s.music, onclick: (e) => playUrl(e.currentTarget, '/api/music') }, icon('play')),
+      el('div', { class: 'grow' },
+        el('b', { text: s.music ? `Musique de fond : ${s.music}` : 'Pas de musique de fond' }),
+        el('p', { class: 'muted', text: 'Elle tourne en boucle et baisse quand on parle. Pour la changer : dépose un MP3 dans le dossier music/ du projet (le premier par ordre alphabétique est pris), ou indique-le dans config.toml.' })),
+    ),
+  ];
+  const job = findEpisode(state.current)?.job || s.job;
+  if (job?.kind === 'sounds' && (isRunning(job) || job.status === 'error')) parts.push(jobCard(job));
+  if (!s.ocr_done) parts.push(el('div', { class: 'notice' }, icon('alert'), el('p', { text: 'Crée d’abord la vidéo : les bruitages sont repérés à la lecture du texte.' })));
+  else {
+    if (s.spots.length) {
+      parts.push(
+        el('section', { class: 'cast-block' },
+          el('div', { class: 'block-head' },
+            el('h3', { id: 'spots-title', text: spotsTitle() }),
+            el('p', { class: 'muted', text: 'Les onomatopées dessinées. Clique sur un son pour l’écouter et le choisir. En pointillés : la proposition de GPT. Le son part au début de la case, sous la voix. Survole l’image pour voir la scène.' })),
+          el('div', { class: 'lines' }, s.spots.map(soundRow))),
+      );
+    }
+    const proposals = s.actions.filter((x) => !x.chosen && x.suggested);
+    const busy = isRunning(job);
+    parts.push(
+      el('section', { class: 'cast-block' },
+        el('div', { class: 'block-head row' },
+          el('div', { class: 'grow' },
+            el('h3', { id: 'actions-title', text: actionsTitle() }),
+            el('p', { class: 'muted', text: 'Les cases où personne ne parle : un coup, des pas, une porte… GPT propose d’après les répliques autour (il ne voit pas l’image) ; survole l’image pour voir la scène.' })),
+          el('div', { class: 'actions' },
+            el('button', { type: 'button', class: 'pill', disabled: busy, title: s.gpt.configured ? '' : 'Colle d’abord la clé GPT', onclick: suggestSounds }, icon('sparkles'), 'Proposer avec GPT'),
+            proposals.length ? el('button', { type: 'button', class: 'pill accent', onclick: () => acceptActions(proposals) }, icon('check'), `Accepter les ${proposals.length} propositions`) : null)),
+        el('div', { class: 'lines' }, s.actions.map(soundRow))),
+    );
+  }
+  box.replaceChildren(...parts);
+}
+
+const spotsTitle = () => {
+  const s = state.sounds;
+  return `Bruitages dessinés · ${s.spots.filter((x) => x.sound !== s.none).length} / ${s.spots.length} avec un son`;
+};
+const actionsTitle = () => {
+  const s = state.sounds;
+  return `Cases sans texte · ${s.actions.filter((x) => x.sound !== s.none).length} / ${s.actions.length} avec un son`;
+};
+
+function soundRow(spot) {
+  const s = state.sounds;
+  const [, , w, ch] = spot.crop;
+  // une bulle : autour d'elle ; une case sans texte : la case entière (pas plus haute qu'un écran)
+  const h = Math.min(ch, Math.round((spot.box ? 0.6 : 1.4) * w));
+  const cy = spot.box ? spot.box[1] + spot.box[3] / 2 : ch / 2;
+  const view = [0, Math.max(0, Math.min(ch - h, Math.round(cy - h / 2))), w, h];
+  const chip = (cat, label) =>
+    el(
+      'button',
+      { type: 'button', class: `chip-btn plain${spot.sound === cat ? ' on' : ''}${spot.suggested === cat && !spot.chosen ? ' proposed' : ''}`, onclick: () => chooseSound(spot, cat) },
+      label,
+    );
+  const marks = spot.box ? [['bubble-box', spot.box]] : [];
+  return el(
+    'div',
+    { class: 'line-row', 'data-key': spot.key },
+    el('div', { class: 'shot', style: `aspect-ratio:${view[2]}/${view[3]}`, onmouseenter: (e) => showContext(e.currentTarget, spot.crop, marks.length ? marks : [['frame-box', [0, 0, w, ch]]]), onmouseleave: hidePeek },
+      el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(spot.frame)}&y=${view[1]}&h=${view[3]}`, alt: '', loading: 'lazy' }),
+      spot.box ? el('span', { class: 'bubble-box', style: boxStyle(spot.box, view) }) : null),
+    el('div', { class: 'line-body' },
+      spot.text ? el('p', { class: 'quote', text: `« ${spot.text} »` }) : el('p', { class: 'quote', text: `Case ${spot.index + 1}` }),
+      spot.reason ? el('p', { class: 'muted', text: `GPT : ${spot.reason}` }) : null,
+      el('div', { class: 'who-chips' }, chip(s.none, 'Aucun'), Object.entries(s.categories).map(([cat, label]) => chip(cat, label)))),
+  );
+}
+
+async function sendSounds(choices) {
+  state.sounds = await api(`/api/sounds?id=${enc(state.chapter.id)}`, { method: 'POST', body: JSON.stringify({ choices }) });
+}
+
+async function chooseSound(spot, cat) {
+  if (cat !== state.sounds.none) playUrl(null, `/api/sfx_sample?cat=${enc(cat)}&text=${enc(spot.text || spot.frame)}`);
+  try {
+    await sendSounds([{ key: spot.key, sound: cat }]);
+    const fresh = [...state.sounds.spots, ...state.sounds.actions].find((x) => x.key === spot.key);
+    if (fresh) document.querySelector(`#sounds .line-row[data-key="${CSS.escape(spot.key)}"]`)?.replaceWith(soundRow(fresh));
+    if ($('#spots-title')) $('#spots-title').textContent = spotsTitle();
+    if ($('#actions-title')) $('#actions-title').textContent = actionsTitle();
+    renderHead();
+  } catch (e) {
+    toast(`Non enregistré : ${e.message}`);
+  }
+}
+
+async function acceptActions(items) {
+  try {
+    await sendSounds(items.map((x) => ({ key: x.key, sound: x.suggested })));
+    renderSounds();
+    toast(plural(items.length, 'son ajouté', 'sons ajoutés'), {
+      label: 'Annuler',
+      run: async () => {
+        await sendSounds(items.map((x) => ({ key: x.key, sound: null })));
+        renderSounds();
+      },
+    });
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+async function suggestSounds() {
+  if (!state.sounds.gpt.configured) return openSettings();
+  const id = state.chapter.id;
+  try {
+    const job = await api(`/api/sounds/suggest?id=${enc(id)}`, { method: 'POST' });
+    const ep = findEpisode(id);
+    if (ep) ep.job = job;
+    state.sounds.job = job;
+    renderSounds();
+    schedulePoll(500);
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+async function onSoundsJob(before, after) {
+  if (isRunning(after)) {
+    const card = $('#job-card');
+    if (card && after.kind === 'sounds') card.replaceWith(jobCard(after));
+    else renderSounds();
+    return;
+  }
+  if (isRunning(before)) {
+    try {
+      const s = await api(`/api/sounds?id=${enc(state.chapter.id)}`);
+      if (state.screen === 'sounds') {
+        state.sounds = s;
+        renderSounds();
+      }
+    } catch {}
+  }
+}
+
+/* ---------- Écran Vidéo : regarder, et signaler un passage raté ---------- */
+
+const fmtTime = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+
+async function openVideo() {
+  const id = state.chapter.id;
+  $('#view').replaceChildren(el('div', { class: 'head', id: 'head' }), el('div', { id: 'videoscreen' }, el('div', { class: 'skeleton short' })));
+  state.videoInfo = null;
+  renderHead();
+  try {
+    const v = await api(`/api/video_info?id=${enc(id)}`);
+    if (state.chapter?.id !== id || state.screen !== 'video') return;
+    state.videoInfo = v;
+    renderVideo();
+  } catch (e) {
+    $('#videoscreen').replaceChildren(el('div', { class: 'notice error' }, icon('alert'), el('p', { text: `Impossible d’ouvrir la vidéo : ${e.message}` })));
+  }
+}
+
+function frameAt(t) {
+  const tl = state.videoInfo?.timeline || [];
+  let found = tl[0];
+  for (const f of tl) if (f.start <= t + 1e-3) found = f;
+  return found;
+}
+
+function renderVideo() {
+  const box = $('#videoscreen');
+  const v = state.videoInfo;
+  if (!box || !v) return;
+  renderHead();
+  if (!v.video) {
+    box.replaceChildren(el('div', { class: 'notice' }, icon('alert'), el('p', { text: 'Pas encore de vidéo : clique sur « Créer la vidéo ».' })));
+    return;
+  }
+  const player = el('video', { id: 'player', src: `/api/video?id=${enc(state.chapter.id)}&v=${Date.now()}`, controls: true, preload: 'metadata', playsinline: true });
+  player.addEventListener('timeupdate', () => renderNow(player.currentTime));
+  player.addEventListener('seeked', () => renderNow(player.currentTime, true));
+  box.replaceChildren(
+    el('div', { class: 'video-layout' },
+      el('div', { class: 'video-frame' }, player),
+      el('div', { class: 'video-side' },
+        el('div', { class: 'card', id: 'now' }),
+        el('div', { class: 'card', id: 'flags' }))),
+  );
+  if (!v.timeline.length) {
+    $('#now').replaceChildren(el('p', { class: 'muted', text: 'Recrée la vidéo une fois pour pouvoir signaler un passage précis (la nouvelle vidéo garde l’emplacement de chaque case).' }));
+  } else renderNow(0, true);
+  renderFlags();
+}
+
+let nowFrame = null;
+function renderNow(t, force = false) {
+  const v = state.videoInfo;
+  const f = frameAt(t);
+  const card = $('#now');
+  if (!card || !f || (!force && nowFrame === f.frame)) return;
+  nowFrame = f.frame;
+  fill(card,
+    el('h3', { text: `En ce moment · case ${f.index + 1} / ${v.timeline.length}` }),
+    f.lines.length
+      ? el('div', { class: 'now-lines' }, f.lines.map((l) => el('p', {}, el('b', { text: `${l.speaker} ` }), el('span', { class: 'muted', text: `(${l.voice}${l.emotion && l.emotion !== 'neutre' ? ` · ${l.emotion}` : ''}) ` }), `« ${l.text} »`)))
+      : el('p', { class: 'muted', text: 'Personne ne parle dans cette case.' }),
+    f.sounds.length ? el('p', { class: 'muted', text: `Son : ${f.sounds.join(', ')}` }) : null,
+    el('p', { class: 'muted', style: 'margin-top:10px', text: 'Quelque chose ne va pas ici ?' }),
+    el('div', { class: 'who-chips' },
+      Object.entries(v.reasons).map(([k, label]) => el('button', { type: 'button', class: 'chip-btn plain', onclick: () => addFlag(f, k) }, icon('alert'), label))),
+  );
+}
+
+async function addFlag(f, reason) {
+  const t = $('#player')?.currentTime || f.start;
+  try {
+    state.videoInfo = await api(`/api/flags?id=${enc(state.chapter.id)}`, { method: 'POST', body: JSON.stringify({ frame: f.frame, t, reason }) });
+    renderFlags();
+    toast(`Signalé : ${state.videoInfo.reasons[reason]} à ${fmtTime(t)}`);
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+async function updateFlag(flag, body) {
+  try {
+    state.videoInfo = await api(`/api/flags/${flag.id}?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify(body) });
+    renderFlags();
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+function renderFlags() {
+  const v = state.videoInfo;
+  const card = $('#flags');
+  if (!card) return;
+  const todo = v.flags.filter((f) => !f.done).length;
+  const indexOf = (file) => v.timeline.find((x) => x.frame === file)?.index;
+  fill(card,
+    el('h3', { text: v.flags.length ? `Passages signalés · ${todo} à corriger` : 'Passages signalés' }),
+    v.flags.length
+      ? el('div', { class: 'flag-list' },
+          [...v.flags].sort((a, b) => a.done - b.done || a.t - b.t).map((flag) =>
+            el('div', { class: `flag${flag.done ? ' done' : ''}` },
+              el('button', { type: 'button', class: 'link', title: 'Revoir ce passage', onclick: () => seek(flag.t) }, fmtTime(flag.t)),
+              el('span', { class: 'grow', text: `${v.reasons[flag.reason]} · case ${(indexOf(flag.frame) ?? 0) + 1}` }),
+              flag.done ? null : el('button', { type: 'button', class: 'chip-btn plain', onclick: () => fixFlag(flag) }, 'Corriger'),
+              el('button', { type: 'button', class: `chip-btn plain${flag.done ? ' on' : ''}`, onclick: () => updateFlag(flag, { done: !flag.done }) }, icon('check'), flag.done ? 'Fait' : 'Marquer fait'),
+              el('button', { type: 'button', class: 'link quiet', title: 'Supprimer', 'aria-label': 'Supprimer', onclick: () => updateFlag(flag, { delete: true }) }, icon('x')))))
+      : el('p', { class: 'muted', text: 'Regarde la vidéo ; si un passage cloche, clique sur la raison ci-dessus au bon moment. Tu le retrouveras ici, avec un bouton pour aller le corriger.' }),
+    v.flags.length && !todo ? el('p', { class: 'muted', text: 'Tout est corrigé : clique sur « Créer la vidéo » pour la mettre à jour.' }) : null,
+  );
+}
+
+function seek(t) {
+  const p = $('#player');
+  if (!p) return;
+  p.currentTime = t;
+  p.play().catch(() => {});
+}
+
+function fixFlag(flag) {
+  // va à l'endroit à corriger : la réplique (voix, texte), le son, ou la case dans la découpe
+  state.focusFrame = flag.frame;
+  const screen = { voice: 'cast', text: 'review', sound: 'sounds', cut: 'cut', other: 'cast' }[flag.reason] || 'cast';
+  switchScreen(screen);
+}
+
+function focusFrameRow() {
+  // après l'ouverture d'un écran : défile jusqu'à la première ligne de la case visée et la fait clignoter
+  const file = state.focusFrame;
+  if (!file) return;
+  state.focusFrame = null;
+  setTimeout(() => {
+    const row = [...document.querySelectorAll('.line-row[data-key]')].find((r) => r.dataset.key.startsWith(`${file}#`) || r.dataset.key === `frame:${file}`);
+    if (row) {
+      row.scrollIntoView({ block: 'center' });
+      row.classList.remove('flash');
+      void row.offsetWidth;
+      row.classList.add('flash');
+    } else if (state.screen === 'cut') {
+      const frame = state.videoInfo?.timeline.find((x) => x.frame === file);
+      if (frame?.crop) focusDoubt({ y: frame.crop[1] + frame.crop[3] / 2, kind: 'tall', panel: state.panels.find((p) => p.y0 <= frame.crop[1] + 2 && frame.crop[1] < p.y1) });
+    } else toast('Cette case n’a rien à corriger ici');
+  }, 400);
+}
+
+/* ---------- Tout en un clic : un lien → la vidéo ---------- */
+
+function importCard() {
+  const job = state.library?.import;
+  const running = isRunning(job);
+  if (!job || (!running && job.status !== 'error' && !(job.chapters || []).length)) return null;
+  let text;
+  if (running) text = job.step === 'download' ? 'Téléchargement… Si une fenêtre de navigateur demande une vérification, passe-la.' : 'En attente…';
+  else if (job.status === 'error') text = `Import impossible : ${job.error}`;
+  else text = `${plural(job.chapters.length, 'chapitre ajouté', 'chapitres ajoutés')} : la vidéo se fait toute seule (suis l’avancement ci-dessous).`;
+  return el('div', { class: `import-card${job.status === 'error' ? ' error' : ''}` }, running ? el('span', { class: 'spinner' }) : icon(job.status === 'error' ? 'alert' : 'check'), el('p', { text }));
+}
+
+function openImport() {
+  $('#import')?.remove();
+  const url = el('input', { class: 'field', placeholder: 'https://… (la page de la série)', spellcheck: 'false' });
+  const chapters = el('input', { class: 'field', placeholder: 'vide = le premier · 12 · 1-5 · latest', spellcheck: 'false' });
+  const auto = el('input', { type: 'checkbox', checked: true });
+  const status = el('p', { class: 'muted', text: '' });
+  const close = () => $('#import')?.remove();
+  const go = async () => {
+    try {
+      const job = await api('/api/import', { method: 'POST', body: JSON.stringify({ url: url.value, chapters: chapters.value, auto: auto.checked }) });
+      state.library.import = job;
+      close();
+      renderLibrary();
+      schedulePoll(800);
+      toast('C’est parti : téléchargement, puis toute la vidéo');
+    } catch (e) {
+      status.textContent = e.message;
+    }
+  };
+  document.body.append(
+    el('div', { id: 'import', class: 'modal', onclick: (e) => e.target.id === 'import' && close() },
+      el('div', { class: 'card modal-card' },
+        el('h3', { text: 'Ajouter des chapitres' }),
+        el('p', { class: 'muted', text: 'Colle le lien de la série : le Studio télécharge les chapitres, les découpe, lit le texte, cherche les personnages, fait relire par GPT, choisit les voix et les sons, puis crée la vidéo. Tu valideras ensuite dans les onglets.' }),
+        el('label', {}, 'Lien de la série', url),
+        el('label', {}, 'Chapitres', chapters),
+        el('label', { class: 'check' }, auto, 'Tout faire (relecture GPT, voix, sons) — sinon seulement la vidéo de base'),
+        status,
+        el('div', { class: 'actions', style: 'justify-content:flex-end' },
+          el('button', { type: 'button', class: 'pill', onclick: close }, 'Fermer'),
+          el('button', { type: 'button', class: 'pill accent', onclick: go }, icon('sparkles'), 'Lancer')))),
+  );
+  url.focus();
+}
+
+async function runAuto() {
+  const ch = state.chapter;
+  if (ch.manual_frames && !confirm(`Remplacer les ${ch.manual_frames} frames faites à la main par cette découpe ?`)) return;
+  if (state.screen === 'cut') await saveNow();
+  try {
+    const job = await api(`/api/auto?id=${enc(ch.id)}`, { method: 'POST' });
+    ch.job = job;
+    const ep = findEpisode(ch.id);
+    if (ep) ep.job = job;
+    renderHead();
+    renderLibrary();
+    schedulePoll(500);
+    toast('Tout se fait : visages, relecture, voix, sons, puis la vidéo');
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
 /* ---------- Mise à jour en direct ---------- */
 
 let pollTimer;
@@ -1424,7 +2307,15 @@ async function poll() {
     state.library = await api('/api/library');
     renderLibrary();
     const after = findEpisode(state.current)?.job;
-    if (state.chapter && state.screen === 'cast' && JSON.stringify(before) !== JSON.stringify(after)) {
+    if (state.chapter && state.screen === 'video' && JSON.stringify(before) !== JSON.stringify(after)) {
+      renderHead();
+      if (isRunning(before) && !isRunning(after)) openVideo();
+    } else if (state.chapter && state.screen === 'sounds' && JSON.stringify(before) !== JSON.stringify(after)) {
+      renderHead();
+      await onSoundsJob(before, after);
+    } else if (state.chapter && state.screen === 'review' && JSON.stringify(before) !== JSON.stringify(after)) {
+      await onReviewJob(before, after);
+    } else if (state.chapter && state.screen === 'cast' && JSON.stringify(before) !== JSON.stringify(after)) {
       await onCastJob(before, after);
     } else if (state.chapter && JSON.stringify(before) !== JSON.stringify(after)) {
       renderHead();
@@ -1437,7 +2328,7 @@ async function poll() {
       }
     }
   } catch {}
-  const busy = state.library?.series.some((s) => s.chapters.some((c) => isRunning(c.job)));
+  const busy = isRunning(state.library?.import) || state.library?.series.some((s) => s.chapters.some((c) => isRunning(c.job)));
   schedulePoll(busy ? 1500 : 10000);
 }
 
@@ -1455,6 +2346,7 @@ window.addEventListener('hashchange', () => {
 });
 
 $('main').addEventListener('scroll', hidePeek, { passive: true });
+$('#settings-btn').addEventListener('click', openSettings);
 
 for (const slot of document.querySelectorAll('[data-icon]')) slot.replaceChildren(icon(slot.dataset.icon));
 

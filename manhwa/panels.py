@@ -294,7 +294,7 @@ def ensure_cuts(chapter, cfg, data=None, analysis=None):
 
 
 # ce qu'une frame garde quand son crop n'a pas changé : pas besoin de relire ni de revoicer
-KEPT_FRAME_KEYS = ("lines", "bubbles", "bubbles_version", "text", "ocr_key", "audio", "audio_key", "speakers")
+KEPT_FRAME_KEYS = ("lines", "bubbles", "bubbles_version", "text", "ocr_key", "audio", "audio_key", "speakers", "review", "segments", "sounds", "action_sound")
 
 
 def build_frames(chapter, cfg, bg_mode=None, progress=None):

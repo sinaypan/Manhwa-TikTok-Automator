@@ -17,10 +17,14 @@ from collections import Counter, defaultdict
 import numpy as np
 
 from manhwa.project import Chapter, is_chapter_dir
+from manhwa.review import effective, is_spoken
 
 CAST_FILE = "characters.json"
 FACES_DIR = "faces"
 NARRATOR = "narrator"
+# figurants : une réplique d'un personnage secondaire qui n'a pas de groupe de visages
+EXTRAS = {"extra_m": ("Figurant (homme)", "Male"), "extra_f": ("Figurant (femme)", "Female")}
+SPECIAL = {NARRATOR, *EXTRAS}
 
 
 # ---------- Personnages de la série ----------
@@ -226,6 +230,44 @@ def update_character(cast, cid, changes, wiki=None):
         c["name"] = " ".join(str(changes["name"] or "").split())[:40]
     if "silent" in changes:
         c["silent"] = bool(changes["silent"])
+    if "voice" in changes:
+        c["voice"] = clean_voice(changes["voice"], by="user")
+        c["voice_ok"] = True  # choisie à la main : validée
+    if "voice_ok" in changes:
+        c["voice_ok"] = bool(changes["voice_ok"])
+
+
+def extra_voice(crew, extra, cfg):
+    """La voix d'un figurant : réglable comme les autres, sinon une voix libre du bon genre."""
+    from manhwa.tts import narrator_voice
+    from manhwa.voices import auto_voice, list_voices
+
+    chosen = (crew.get("extras") or {}).get(extra, {}).get("voice")
+    if chosen:
+        return chosen
+    used = {c["voice"]["name"] for c in crew["characters"] if c.get("voice")}
+    return auto_voice(EXTRAS[extra][1], used, narrator_voice(cfg, crew)["name"], list_voices())
+
+
+def add_character(crew, name):
+    """Un personnage secondaire créé depuis une réplique (sans visage) : il garde son nom."""
+    name = " ".join(str(name or "").split())[:40]
+    if not name:
+        raise ValueError("Donne un nom")
+    cid = new_character(crew)
+    character(crew, cid)["name"] = name
+    return cid
+
+
+def clean_voice(voice, by="user"):
+    """Une voix reçue du Studio : seulement les champs connus, valeurs bornées."""
+    from manhwa.voices import hz, list_voices, pct
+
+    voice = voice or {}
+    if voice.get("name") not in {v["name"] for v in list_voices()}:
+        raise ValueError("Voix inconnue")
+    return {"name": voice["name"], "pitch": hz(voice.get("pitch")), "rate": pct(voice.get("rate"), 30),
+            "reason": str(voice.get("reason") or "")[:120], "by": by}
 
 
 # ---------- Noms proposés depuis le wiki ----------
@@ -380,9 +422,10 @@ def lines(data, cast):
     for i, frame in enumerate(frames):
         here = by_frame.get(frame["file"], [])
         speakers = frame.get("speakers") or {}
-        for j, bubble in enumerate(frame.get("bubbles") or []):
-            if bubble["kind"] != "dialogue":
+        for bubble in effective(frame):  # corrections de la relecture acceptées (texte, type)
+            if not is_spoken(bubble):
                 continue
+            j = bubble["index"]
             scores = defaultdict(float)
             bx, by = _center(bubble["box"])
             width = frame["crop"][2] or 1
@@ -398,13 +441,17 @@ def lines(data, cast):
             for cid, n in counts.items():
                 scores[cid] = max(scores[cid], 0.1 * n / total)
             ranked = sorted(scores, key=lambda c: -scores[c])
-            speaker = speakers.get(bubble["text"])
-            if speaker not in ids and speaker != NARRATOR:
+            if bubble["kind"] == "narration":
+                ranked.insert(0, NARRATOR)  # un encadré de narration : le narrateur d'abord
+            speaker = speakers.get(bubble["orig"])
+            if speaker not in ids and speaker not in SPECIAL:
                 speaker = None
             out.append({
                 "key": f"{frame['file']}#{j}",
                 "frame": frame["file"],
                 "text": bubble["text"],
+                "kind": bubble["kind"],
+                "emotion": bubble["emotion"],
                 "box": bubble["box"],
                 "speaker": speaker,
                 "suggestion": ranked[0] if ranked else None,

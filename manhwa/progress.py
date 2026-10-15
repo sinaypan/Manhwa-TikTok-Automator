@@ -11,7 +11,7 @@ def chapter_progress(chapter, cfg):
     from manhwa.bubbles import BUBBLES_VERSION
     from manhwa.ocr import ocr_key
     from manhwa.render import render_key
-    from manhwa.tts import audio_key
+    from manhwa.tts import tts_up_to_date
 
     data = chapter.load()
     frames = data["frames"]
@@ -21,10 +21,7 @@ def chapter_progress(chapter, cfg):
         f.get("ocr_key") == ocr_key(f, data, cfg) and "lines" in f and f.get("bubbles_version") == BUBBLES_VERSION
         for f in frames
     )
-    tts_done = ocr_done and all(
-        f.get("audio_key") == audio_key(f["text"], cfg) and (chapter.root / f.get("audio", "")).is_file()
-        for f in texts
-    )
+    tts_done = ocr_done and tts_up_to_date(chapter, data, cfg)
     video_done = (
         chapter.video_path.is_file()
         and data["steps"].get("render", {}).get("key") == render_key(chapter, data, cfg)

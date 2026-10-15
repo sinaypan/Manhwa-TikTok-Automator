@@ -106,10 +106,31 @@ def windows_lines(img, cfg, lang="en-US"):
 
 # ---------- PaddleOCR ----------
 
-def _paddle():
+def paddle_device(cfg=None):
+    """« gpu:0 » si Paddle a été installé avec CUDA (paddlepaddle-gpu) et voit une carte, sinon « cpu ».
+
+    [ocr] device = "auto" (défaut), "gpu" ou "cpu".
+    """
+    wanted = ((cfg or {}).get("ocr", {}).get("device") or "auto").lower()
+    if wanted == "cpu":
+        return "cpu"
+    try:
+        import paddle
+
+        if paddle.device.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0:
+            return "gpu:0"
+    except Exception:
+        pass
+    return "cpu"
+
+
+def _paddle(cfg=None):
     if "paddle" not in _cache:
         os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
         from paddleocr import PaddleOCR
+
+        device = paddle_device(cfg)
+        print(f"  PaddleOCR sur {'la carte graphique' if device.startswith('gpu') else 'le processeur'} ({device})")
 
         # modèles « mobile » : même précision que les « medium » sur nos bulles (banc d'essai
         # du chapitre 1), mais 2 à 4 s par case au lieu de 15 à 20 s sur processeur
@@ -121,12 +142,13 @@ def _paddle():
             use_textline_orientation=False,
             # oneDNN plante avec Paddle 3.3 sur processeur (ConvertPirAttribute2RuntimeAttribute)
             enable_mkldnn=False,
+            device=device,
         )
     return _cache["paddle"]
 
 
 def paddle_lines(img, cfg):
-    result = _paddle().predict(img)
+    result = _paddle(cfg).predict(img)
     if not result:
         return []
     r = result[0]

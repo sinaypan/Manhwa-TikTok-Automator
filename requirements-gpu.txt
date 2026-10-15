@@ -1,0 +1,6 @@
+# OCR sur carte graphique NVIDIA (≈ 26× plus rapide que sur processeur, mesuré sur une RTX 3050).
+# Remplace paddlepaddle (processeur) par paddlepaddle-gpu, version CUDA 12.6 :
+#   uv pip uninstall paddlepaddle
+#   uv pip install -r requirements-gpu.txt --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --index-strategy unsafe-best-match
+# Sans carte NVIDIA, garde requirements.txt : l'OCR tourne sur le processeur.
+paddlepaddle-gpu==3.3.1

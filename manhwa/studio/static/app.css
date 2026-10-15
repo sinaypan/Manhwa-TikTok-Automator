@@ -1550,3 +1550,418 @@ select.chip-btn {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* ---------- Réglages, voix, émotion, relecture ---------- */
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  border-radius: 50%;
+  color: var(--muted);
+}
+
+.icon-btn:hover {
+  background: var(--field);
+  color: var(--text);
+}
+
+.head-actions {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.voice-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.voice-row.ok {
+  background: none;
+  padding: 0;
+}
+
+.voice-row .play {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.voice-row .play svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+.voice-row .play.on {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.voice-row .play.loading {
+  opacity: 0.6;
+}
+
+.voice-select {
+  max-width: 190px;
+  color: var(--text);
+}
+
+.pitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pitch .link {
+  width: 20px;
+  font-size: 15px;
+}
+
+.voice-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.voice-ok svg {
+  width: 13px;
+  height: 13px;
+}
+
+.voice-reason {
+  flex-basis: 100%;
+  font-size: 11px;
+}
+
+.narrator-card {
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.line-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+select.emotion {
+  padding: 3px 10px;
+  color: var(--muted);
+}
+
+select.emotion.set {
+  color: var(--accent);
+}
+
+/* Relecture */
+.line-row.review.accepted {
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+
+.line-row.review.rejected {
+  opacity: 0.55;
+}
+
+.diff {
+  display: grid;
+  gap: 4px;
+}
+
+.diff .old {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.diff .new {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.diff mark {
+  padding: 0 2px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ok) 28%, transparent);
+  color: inherit;
+}
+
+.change b {
+  color: var(--accent);
+}
+
+.chip-btn.refused {
+  background: color-mix(in srgb, var(--error) 25%, var(--field));
+  color: var(--error);
+}
+
+.chip-btn > svg {
+  fill: none;
+}
+
+/* Fenêtre Réglages */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.modal-card {
+  display: grid;
+  gap: 10px;
+  width: min(480px, 100%);
+  padding: 20px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+}
+
+.modal-card label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field {
+  padding: 8px 10px;
+  border: 1px solid var(--sep);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.field:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* écran étroit : les onglets passent sous le titre au lieu de déborder */
+@media (max-width: 1100px) {
+  .head {
+    flex-wrap: wrap;
+  }
+
+  .head .titles {
+    flex-basis: 100%;
+  }
+
+  .head .tabs {
+    order: 2;
+  }
+
+  .head .actions {
+    order: 3;
+    flex-wrap: wrap;
+    margin-left: auto;
+  }
+}
+
+/* Écran Sons */
+.music-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.music-card .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.music-card p {
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.music-card .play,
+.line-row .play {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.music-card .play svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.music-card .play.on {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+#sounds {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+#review {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+/* Écran Vidéo */
+#videoscreen {
+  margin-top: 18px;
+}
+
+.video-layout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.video-frame video {
+  display: block;
+  height: min(78vh, 760px);
+  aspect-ratio: 9 / 16;
+  border-radius: 14px;
+  background: #000;
+}
+
+.video-side {
+  display: grid;
+  gap: 14px;
+}
+
+.now-lines {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.flag-list {
+  display: grid;
+  gap: 6px;
+}
+
+.flag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.flag .grow {
+  flex: 1;
+}
+
+.flag.done {
+  opacity: 0.55;
+}
+
+.flag .link {
+  font-variant-numeric: tabular-nums;
+}
+
+.line-row.flash {
+  animation: row-flash 1.4s ease-out;
+}
+
+@keyframes row-flash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 3px var(--accent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@media (max-width: 1100px) {
+  .video-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .video-frame video {
+    height: auto;
+    width: 100%;
+    max-height: 70vh;
+  }
+}
+
+/* Ajouter des chapitres (tout en un clic) */
+.add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.add-btn:hover {
+  background: var(--tint);
+}
+
+.import-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--tint);
+  font-size: 12px;
+}
+
+.import-card.error {
+  background: color-mix(in srgb, var(--error) 18%, var(--field));
+  color: var(--error);
+}
+
+.import-card svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+}
+
+.modal-card label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.avatar.extra {
+  background: color-mix(in srgb, var(--warn) 18%, var(--bg));
+  color: var(--warn);
+}
