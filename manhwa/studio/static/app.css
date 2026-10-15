@@ -1,0 +1,765 @@
+/* Manhwa Studio — même langage visuel que les extensions (fil, zen, focus…) :
+   police système, gris iOS, séparateurs fins, icônes au trait, clair/sombre automatique. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --field: #f2f2f7;
+  --raised: #ffffff;
+  --text: #1c1c1e;
+  --muted: #8e8e93;
+  --sep: rgba(60, 60, 67, 0.12);
+  --accent: #5856d6;
+  --accent-text: #ffffff;
+  --warn: #ff9f0a;
+  --ok: #34c759;
+  --error: #c0271d;
+  --tint: color-mix(in srgb, var(--accent) 22%, var(--field));
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --field: #2c2c2e;
+    --raised: #3a3a3c;
+    --text: #f2f2f7;
+    --sep: rgba(235, 235, 245, 0.12);
+    --accent: #5e5ce6;
+    --ok: #30d158;
+    --error: #ff6961;
+    --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  display: grid;
+  grid-template-columns: 290px 1fr;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* ---------- Barre latérale : séries → épisodes ---------- */
+
+aside {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 12px 12px;
+  background: var(--field);
+}
+
+#brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px;
+}
+
+#brand h1 {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+#brand p {
+  font-size: 12px;
+}
+
+.logo {
+  display: inline-flex;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.logo svg {
+  width: 18px;
+  height: 18px;
+}
+
+#library {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -4px;
+  padding: 0 4px;
+  overflow-y: auto;
+  scrollbar-color: var(--sep) transparent;
+  scrollbar-width: thin;
+}
+
+.series + .series {
+  margin-top: 14px;
+}
+
+.series-head {
+  padding: 4px 8px 6px;
+}
+
+.series-head .line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.series-head .count {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar {
+  height: 4px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--sep);
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.5s ease;
+}
+
+.episode {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.episode:hover {
+  background: var(--sep);
+}
+
+.episode.on {
+  background: var(--tint);
+}
+
+.episode .line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.episode .name {
+  flex: 1;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.episode.on .name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .episode.on .name {
+    color: var(--text);
+  }
+}
+
+.episode .state {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.episode .state svg {
+  width: 13px;
+  height: 13px;
+  color: var(--ok);
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 3px;
+}
+
+.steps i {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--sep);
+  transition: background 0.4s ease;
+}
+
+.steps i.on {
+  background: var(--accent);
+}
+
+.steps i.running {
+  background: linear-gradient(90deg, var(--sep), var(--accent), var(--sep));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinner.light {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ---------- Zone principale ---------- */
+
+main {
+  position: relative;
+  min-width: 0;
+  overflow-y: auto;
+  scrollbar-color: var(--sep) transparent;
+  scrollbar-width: thin;
+}
+
+#view {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 28px 60px;
+}
+
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 -28px;
+  padding: 16px 28px 12px;
+  border-bottom: 1px solid var(--sep);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.head .titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.head h2 {
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.head p {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--field);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pill.accent {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.pill.warn {
+  background: color-mix(in srgb, var(--warn) 18%, var(--field));
+  color: var(--warn);
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--field);
+}
+
+.notice svg {
+  margin-top: 1px;
+  color: var(--warn);
+}
+
+.notice.error {
+  color: var(--error);
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 28px;
+  margin-top: 18px;
+}
+
+/* ---------- Strip et coupes ---------- */
+
+#strip {
+  position: relative;
+  width: 380px;
+  margin: 0 auto;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--field);
+  cursor: crosshair;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+#strip img {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+}
+
+.panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 0 transparent;
+  transition: box-shadow 0.15s ease;
+}
+
+.panel:hover,
+.panel.on {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.panel .badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(6px);
+}
+
+.panel .badge.tall {
+  background: color-mix(in srgb, var(--warn) 85%, black);
+}
+
+.cut {
+  position: absolute;
+  left: -6px;
+  right: -6px;
+  z-index: 2;
+  height: 16px;
+  margin-top: -8px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.cut::before {
+  position: absolute;
+  top: 7px;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
+  content: '';
+  transform-origin: left;
+}
+
+.cut.doubt::before {
+  background: repeating-linear-gradient(90deg, var(--warn) 0 8px, transparent 8px 13px);
+  box-shadow: none;
+}
+
+.cut:hover::before,
+.cut.dragging::before {
+  height: 4px;
+  top: 6px;
+  background: var(--accent);
+}
+
+.cut.focus::before {
+  animation: pulse 1s ease 2;
+}
+
+.intro .cut::before {
+  animation: draw 0.45s ease both;
+  animation-delay: calc(var(--i) * 10ms);
+}
+
+@keyframes draw {
+  from {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+}
+
+@keyframes pulse {
+  50% {
+    height: 6px;
+    top: 5px;
+    background: var(--warn);
+  }
+}
+
+/* ---------- Colonne de droite : aperçu ---------- */
+
+.side {
+  position: sticky;
+  top: 86px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.card {
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--field);
+}
+
+.card h3 {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.frame img,
+.frame video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.frame .empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.caption {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gestures {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.gestures li {
+  display: flex;
+  gap: 8px;
+}
+
+.gestures b {
+  min-width: 92px;
+  font-weight: 600;
+}
+
+.job {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.job-steps {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.job-steps div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.job-steps div.on {
+  color: var(--text);
+}
+
+.job-steps div.done {
+  color: var(--text);
+}
+
+.job-steps svg {
+  width: 13px;
+  height: 13px;
+  color: var(--ok);
+}
+
+.job-steps .dot {
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid var(--sep);
+  border-radius: 50%;
+}
+
+/* ---------- États vides et chargement ---------- */
+
+.empty-state {
+  display: flex;
+  min-height: 70vh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.empty-state .logo {
+  margin-bottom: 6px;
+}
+
+.empty-state h2 {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.empty-state code {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.skeleton {
+  width: 380px;
+  height: 70vh;
+  margin: 18px auto 0;
+  border-radius: 6px;
+  background: linear-gradient(100deg, var(--field) 30%, color-mix(in srgb, var(--accent) 14%, var(--field)) 50%, var(--field) 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+.loading-label {
+  margin-top: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ---------- Toast ---------- */
+
+#toast {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 16px;
+  border-radius: 999px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+  animation: rise 0.2s ease;
+}
+
+#toast button {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+/* ---------- Écrans moyens : l'aperçu passe sous le strip ---------- */
+
+@media (max-width: 1100px) {
+  #view {
+    padding: 0 16px 60px;
+  }
+
+  .head {
+    margin: 0 -16px;
+    padding: 14px 16px 10px;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .side {
+    position: static;
+    order: -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+
+  .side .frame {
+    max-width: 220px;
+  }
+}
+
+/* ---------- Petits écrans (téléphone) ---------- */
+
+@media (max-width: 860px) {
+  body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    overflow: auto;
+  }
+
+  aside {
+    max-height: 40vh;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .side {
+    position: static;
+  }
+
+  #strip,
+  .skeleton {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}

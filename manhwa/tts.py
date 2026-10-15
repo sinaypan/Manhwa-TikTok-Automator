@@ -23,7 +23,8 @@ async def _run(chapter, data, todo, cfg):
     sem = asyncio.Semaphore(max(1, cfg["tts"]["concurrency"]))
 
     async def one(frame):
-        path = chapter.audio_dir / (os.path.splitext(frame["file"])[0] + ".mp3")
+        # nommé d'après le texte et la voix : une frame renumérotée garde sa voix
+        path = chapter.audio_dir / f"{audio_key(frame['text'], cfg)}.mp3"
         async with sem:
             try:
                 await _synthesize(frame["text"], path, cfg)
@@ -58,4 +59,12 @@ def run_tts(chapter, cfg, force=False):
     print(f"  Génération de {len(todo)} voix ({cfg['tts']['voice']})...")
     asyncio.run(_run(chapter, data, todo, cfg))
     chapter.save(data)
+    _remove_unused(chapter, data)
     return len(todo)
+
+
+def _remove_unused(chapter, data):
+    used = {chapter.root / f["audio"] for f in data["frames"] if f.get("audio")}
+    for path in chapter.audio_dir.glob("*.mp3"):
+        if path not in used:
+            path.unlink()

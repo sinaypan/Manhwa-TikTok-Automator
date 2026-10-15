@@ -20,7 +20,7 @@ FRAMES_DIR = "frames"
 AUDIO_DIR = "audio"
 PROJECT_FILE = "project.json"
 VIDEO_FILE = "video.mp4"
-_SKIP_DIRS = {PAGES_DIR, FRAMES_DIR, AUDIO_DIR, ".git", ".venv", "__pycache__"}
+_SKIP_DIRS = {PAGES_DIR, FRAMES_DIR, AUDIO_DIR, ".studio", ".git", ".venv", "__pycache__"}
 
 
 def fingerprint(*parts):

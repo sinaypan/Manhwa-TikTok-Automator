@@ -57,9 +57,35 @@ inbox/ ─► 1. Découpe auto ─► 2. OCR local ─► 3. Description locale 
   ajouter une coupe **aimantée sur la gouttière la plus proche**, glisser = ajuster.
 
 ### 2. OCR local (GPU)
-- Détection des zones de texte : `comic-text-detector`.
-- Lecture : **PaddleOCR** (plan B : EasyOCR).
-- Pour chaque bulle : texte, position, note de confiance.
+- Constat sur le chapitre 1 de Myst Might Mayhem (Tesseract, V1) : texte trouvé sur
+  78 frames sur 170, beaucoup de bulles jamais lues ou lues à moitié. Causes :
+  Tesseract lit toute la frame d'un bloc (plusieurs bulles + dessin = bruit), et les
+  filtres anti-bruit jettent des bulles entières.
+- **D'abord trouver les bulles, puis lire chaque bulle séparément** :
+  détection avec `comic-text-detector`.
+- Lecture : plusieurs moteurs candidats, départagés par un **banc d'essai** sur ce
+  chapitre (bulles lues entièrement, mots justes) :
+  - **PaddleOCR** (GPU) ;
+  - **OCR de Windows** (celui de Win+Maj+T dans PowerToys) : local, gratuit, rapide,
+    appelable depuis Python ;
+  - EasyOCR en plan B.
+  On peut garder les deux meilleurs et laisser GPT-4.1 / le Studio choisir quand ils
+  ne sont pas d'accord.
+- Pour chaque bulle : texte, position, note de confiance, type probable (dialogue /
+  SFX). Les SFX ne sont plus jetés : ils servent aux bruitages.
+
+### 2 bis. Bruitages
+- Une **bibliothèque locale** `sfx/` rangée par catégorie : coup, impact, verre brisé,
+  bois / planche cassée, épée, explosion, whoosh, pas, porte, aura / magie, cri, « aïe »,
+  rire, cœur, tonnerre, pluie… Sons libres de droits uniquement (CC0 en priorité,
+  pour ne pas avoir à créditer).
+- **D'où viennent les bruitages** :
+  1. les onomatopées dessinées (`KRAK`, `BAM`, `CRASH`…) repérées par l'OCR et
+     associées à une catégorie ;
+  2. les cases d'action sans texte, via la description locale ou GPT-4.1 d'après le
+     contexte (« il frappe le mur » → impact).
+- Dans le Studio : le son proposé avec ▶ écouter, puis ✔ / changer / aucun.
+- Au rendu : calé sur le début de la case, volume sous la voix.
 
 ### 3. Description locale des cases (option)
 - Petit modèle de vision local (Florence-2 ou Qwen2.5-VL 3B via Ollama) : une phrase par
@@ -93,7 +119,8 @@ inbox/ ─► 1. Découpe auto ─► 2. OCR local ─► 3. Description locale 
 
 ### 7. Rendu
 - ffmpeg : défilement vertical des cases hautes, léger zoom sinon, fond flouté,
-  transitions courtes, musique qui baisse sous la voix, 1080×1920 à 30 fps.
+  transitions courtes, musique qui baisse sous la voix, bruitages mixés,
+  1080×1920 à 30 fps.
 
 ## Le Studio
 
@@ -129,12 +156,12 @@ l'automatique (« le matching a raison 87 % du temps »).
 
 | # | Phase | Fini quand… |
 |---|---|---|
-| 0 | **Remise à plat** : bugs V1, structure `manhwa/`, venv, `.env`, `config.toml`, `project.json`, scraper corrigé vers `inbox/` | Un chapitre téléchargé arrive dans `inbox/` et en ressort en vidéo V1 |
-| 1 | **Studio de base** (style, séries/épisodes, progression) + découpe auto + écran Découpe | Un chapitre découpé en quelques clics |
-| 2 | **OCR local** + écrans Texte douteux et Type de bulle | Plus aucune bulle à retaper |
+| 0 | ✅ **Remise à plat** : bugs V1, structure `manhwa/`, venv, `.env`, `config.toml`, `project.json`, scraper corrigé vers `inbox/` | Un chapitre téléchargé arrive dans `inbox/` et en ressort en vidéo V1 (validé : Myst Might Mayhem ch. 1) |
+| 1 | ✅ **Studio de base** (style, séries/épisodes, progression) + découpe auto + écran Découpe | Un chapitre découpé en quelques clics (Myst Might Mayhem ch. 1 : 141 cases proposées, 6 endroits à vérifier) |
+| 2 | **OCR local** (détection des bulles + banc d'essai PaddleOCR / OCR Windows) + repérage des SFX + écrans Texte douteux et Type de bulle | Plus aucune bulle oubliée ni à retaper |
 | 3 | **Bible (wiki) + visages + GPT-4.1 + novel** + écran Qui parle | Toutes les répliques attribuées en cliquant sur des têtes |
 | 4 | **Voix multiples + sous-titres karaoké** + écran Voix | Narrateur + une voix par perso, réglées une fois |
-| 5 | **Rendu final** + écran Vidéo | Un MP4 publiable, < 2 min de travail humain |
+| 5 | **Rendu final** + **bruitages** + écran Vidéo | Un MP4 publiable, < 2 min de travail humain |
 | 6 | **Confort** : téléphone, plusieurs séries, mode YouTube long, description locale | — |
 
 ## Décisions en attente

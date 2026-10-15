@@ -94,7 +94,9 @@ def letterbox(crop, out_w, out_h, bg_mode="blur", blur_ksize=61):
 
     # "cover" : le crop agrandi remplit tout le cadre et sert de base au fond
     scale_cover = max(out_w / cw, out_h / ch)
-    cover = cv2.resize(crop, (int(cw * scale_cover), int(ch * scale_cover)), interpolation=cv2.INTER_AREA)
+    # au moins out_w x out_h : un arrondi à 1 px près donnait un décalage négatif → frame vide
+    cover_size = (max(out_w, round(cw * scale_cover)), max(out_h, round(ch * scale_cover)))
+    cover = cv2.resize(crop, cover_size, interpolation=cv2.INTER_AREA)
     y0 = (cover.shape[0] - out_h) // 2
     x0 = (cover.shape[1] - out_w) // 2
     frame = cover[y0:y0 + out_h, x0:x0 + out_w].copy()
@@ -102,7 +104,8 @@ def letterbox(crop, out_w, out_h, bg_mode="blur", blur_ksize=61):
 
     # "contain" : le crop entier, net, collé au centre
     scale_contain = min(out_w / cw, out_h / ch)
-    new_w, new_h = int(cw * scale_contain), int(ch * scale_contain)
+    new_w = min(out_w, max(1, round(cw * scale_contain)))
+    new_h = min(out_h, max(1, round(ch * scale_contain)))
     crop_rs = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_AREA)
     y = (out_h - new_h) // 2
     x = (out_w - new_w) // 2

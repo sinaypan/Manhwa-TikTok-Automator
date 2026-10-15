@@ -40,6 +40,15 @@ def test_bg_mode_changes_output():
     assert not np.array_equal(blur, black)
 
 
+def test_letterbox_always_fills_the_frame():
+    """Régression : certaines proportions donnaient une frame vide (arrondi à 1 px près)."""
+    rng = np.random.default_rng(0)
+    for cw in (384, 400, 498, 800, 1200):
+        for ch in range(50, 3000, 37):
+            crop = rng.integers(0, 255, (ch, cw, 3), dtype=np.uint8)
+            assert letterbox(crop, 1080, 1920, "blur", 21).shape == (1920, 1080, 3), (cw, ch)
+
+
 def test_save_and_undo_frames(tmp_path):
     cfg = load_config()
     make_pages(tmp_path / "pages", ["1.jpg", "2.jpg"])

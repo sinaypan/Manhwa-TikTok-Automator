@@ -2,9 +2,10 @@
 
 Transforme un chapitre de manhwa/webtoon en vidéo verticale 9:16 avec voix off.
 
-**État : V2, phase 0.** Le pipeline V1 (découpe manuelle → OCR → voix → vidéo) tourne
-maintenant d'une seule commande, sur un dossier `inbox/`. La suite (découpe auto,
-Studio, OCR local, GPT-4.1, sous-titres…) est décrite dans [PLAN_V2.md](PLAN_V2.md).
+**État : V2, phase 1.** Les chapitres arrivent dans `inbox/`, la découpe en cases est
+automatique et se retouche en quelques clics dans le **Studio** (une page web locale),
+puis OCR → voix → vidéo. La suite (OCR local, GPT-4.1, sous-titres, bruitages…) est
+décrite dans [PLAN_V2.md](PLAN_V2.md).
 
 ## Installation
 
@@ -47,15 +48,38 @@ Un chapitre = un dossier `inbox/<série>/<chapitre>/`. Deux façons :
 
   Les sélecteurs CSS de chaque site sont dans `config.toml` → `[scraper.sites.*]`.
 
-### 2. Fabriquer les vidéos
+### 2. Le Studio
+
+```bash
+.venv\Scripts\python -m manhwa studio
+```
+
+Ouvre `http://127.0.0.1:8765/` dans le navigateur (rien n'est accessible depuis
+l'extérieur). À gauche, les séries et leurs épisodes avec leur avancement ; au centre,
+le chapitre avec la découpe déjà proposée :
+
+| Geste | Effet |
+|---|---|
+| Clic sur une ligne | Supprimer la coupe |
+| Clic dans une case | Ajouter une coupe (aimantée sur la marge la plus proche) |
+| Glisser une ligne | L'ajuster |
+| Survol d'une case | Aperçu de sa frame 9:16 |
+| Ctrl+Z | Annuler |
+
+Les lignes en pointillés et les badges orange (case très haute) sont les endroits à
+vérifier ; « Tout est bon » les valide d'un coup. **Créer la vidéo** lance frames →
+texte → voix → rendu en arrière-plan, et la vidéo s'affiche dans le Studio à la fin.
+
+### 3. Ou tout en ligne de commande
 
 ```bash
 .venv\Scripts\python -m manhwa make
 ```
 
 Pour chaque chapitre de `inbox/` (ou seulement celui indiqué en argument) :
-découpe (si pas encore faite) → OCR → voix → `video.mp4` dans le dossier du chapitre.
-Chaque étape est mise en cache : relancer `make` ne refait que ce qui a changé.
+découpe automatique (si pas encore faite) → OCR → voix → `video.mp4` dans le dossier
+du chapitre. Chaque étape est mise en cache : relancer `make` ne refait que ce qui a
+changé. `make --manual` ouvre l'ancienne fenêtre de découpe à la main.
 
 Voir où en est chaque chapitre :
 
@@ -63,10 +87,10 @@ Voir où en est chaque chapitre :
 .venv\Scripts\python -m manhwa status
 ```
 
-Les étapes existent aussi séparément : `slice`, `ocr`, `tts`, `render`
-(avec `--force` pour refaire même si c'est à jour).
+Les étapes existent aussi séparément : `cut` (découpe auto), `slice` (à la main),
+`ocr`, `tts`, `render` (avec `--force` pour refaire même si c'est à jour).
 
-### Contrôles de la découpe
+### Contrôles de la découpe à la main (`slice`)
 
 | Touche | Action |
 |---|---|
@@ -88,8 +112,9 @@ Les étapes existent aussi séparément : `slice`, `ocr`, `tts`, `render`
 inbox/<série>/chapter-012/
   pages/          images source (ou directement à la racine du chapitre)
   frames/         frames 9:16
-  audio/          une voix par frame
-  project.json    état de chaque étape
+  audio/          une voix par réplique
+  .studio/        cache du Studio (profil du chapitre, vignettes)
+  project.json    état de chaque étape (coupes, crops, textes…)
   video.mp4       résultat
 ```
 
