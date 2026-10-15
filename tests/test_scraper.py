@@ -4,6 +4,7 @@ from manhwa.config import load_config
 from manhwa.ingest.scraper import (
     chapter_dirname,
     chapter_number,
+    keep_page_images,
     page_stem,
     parse_selection,
     site_profile,
@@ -50,6 +51,16 @@ def test_names_sort_in_reading_order():
     assert chapter_dirname(12.5) == "chapter-012.5"
     stems = [page_stem(i, 120) for i in (1, 11, 100, 120)]
     assert stems == sorted(stems) == ["001", "011", "100", "120"]
+
+
+def test_keep_page_images_drops_banners_and_thumbnails():
+    # disposition réelle d'un chapitre Asura : couverture, bannière, pages, vignettes
+    found = [{"src": "cover", "width": 400, "height": 580}, {"src": "banner", "width": 1200, "height": 800}]
+    found += [{"src": f"p{i}", "width": 800, "height": 13000} for i in range(20)]
+    found += [{"src": f"thumb{i}", "width": 384, "height": 384} for i in range(15)]
+    found += [{"src": "p3", "width": 800, "height": 13000}]  # doublon
+    assert keep_page_images(found) == [f"p{i}" for i in range(20)]
+    assert keep_page_images([]) == []
 
 
 def test_site_profile_falls_back_to_default():

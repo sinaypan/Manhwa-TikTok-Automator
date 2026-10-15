@@ -1,11 +1,12 @@
 """Téléchargement des chapitres d'une série vers inbox/<série>/chapter-NNN/pages/.
 
 La vérification anti-robot (Cloudflare) reste manuelle : la fenêtre du navigateur
-s'ouvre, tu la passes toi-même, puis tu appuies sur Entrée dans le terminal.
+s'ouvre, tu la passes toi-même, et le téléchargement reprend tout seul.
 """
 import mimetypes
 import os
 import re
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -16,6 +17,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from manhwa.config import inbox_dir
+from manhwa.images import dominant_width
 from manhwa.project import PAGES_DIR
 
 USER_AGENT = (
@@ -157,26 +159,40 @@ def smart_scroll(page, max_rounds=60):
 
 
 IMAGES_JS = """([minWidth, exts]) => Array.from(document.querySelectorAll('img'))
-    .map(img => ({src: img.currentSrc || img.src, width: img.naturalWidth}))
+    .map(img => ({src: img.currentSrc || img.src, width: img.naturalWidth, height: img.naturalHeight}))
     .filter(img => img.width > minWidth && img.src.startsWith('http')
         && (exts.length === 0 || exts.some(e => new URL(img.src).pathname.toLowerCase().endsWith(e))))"""
 
 
+def keep_page_images(found, tolerance=0.10):
+    """Garde seulement les pages du chapitre, dans l'ordre, sans doublons.
+
+    Autour du lecteur, la page web contient couverture, bannières et vignettes
+    (recommandations, commentaires). Les vraies pages ont toutes la même largeur :
+    celle qui couvre le plus de hauteur. On écarte ce qui s'en éloigne de plus de 10 %.
+    """
+    unique = list({img["src"]: img for img in found}.values())
+    width = dominant_width([(img["width"], img["height"]) for img in unique])
+    if width is None:
+        return []
+    return [img["src"] for img in unique if abs(img["width"] - width) <= tolerance * width]
+
+
 def chapter_images(page, profile):
     found = page.evaluate(IMAGES_JS, [profile["image_min_width"], [e.lower() for e in profile["image_extensions"]]])
-    seen, urls = set(), []
-    for img in found:
-        if img["src"] not in seen:
-            seen.add(img["src"])
-            urls.append(img["src"])
+    urls = keep_page_images(found)
+    if len(urls) < len({img["src"] for img in found}):
+        print(f"  {len({img['src'] for img in found}) - len(urls)} images hors chapitre écartées (bannières, vignettes).")
     return urls
 
 
 def series_title(page, profile):
     try:
         el = page.query_selector(profile["title"])
-        if el and el.inner_text().strip():
-            return sanitize_filename(el.inner_text())
+        text = el.inner_text().strip() if el else ""
+        # un vrai titre a des lettres ("98" est une note ou un compteur, pas un titre)
+        if sum(c.isalpha() for c in text) >= 3:
+            return sanitize_filename(text)
     except Exception:
         pass
     # repli : le titre de l'onglet, avant le premier séparateur
@@ -196,9 +212,16 @@ def download_series(url, cfg, selection=None, series=None, force=False):
         print(f"Connexion à {url} ...")
         page.goto(url)
         try:
-            page.wait_for_selector(profile["chapter_links"], timeout=8000)
+            page.wait_for_selector(profile["chapter_links"], state="attached", timeout=8000)
         except Exception:
-            input(">>> Passe la vérification dans la fenêtre du navigateur, puis appuie sur ENTRÉE <<<")
+            # pas d'Entrée à taper : on reprend tout seul dès que la page de la série est là
+            print(">>> Passe la vérification dans la fenêtre du navigateur (j'attends jusqu'à 3 min) <<<")
+            try:
+                page.wait_for_selector(profile["chapter_links"], state="attached", timeout=180_000)
+            except Exception:
+                print("Page de la série introuvable : vérification non passée, ou sélecteur chapter_links à revoir.")
+                browser.close()
+                return []
 
         title = sanitize_filename(series) if series else series_title(page, profile)
         links = page.eval_on_selector_all(profile["chapter_links"], "els => els.map(e => [e.href, e.innerText])")
@@ -239,6 +262,8 @@ def download_series(url, cfg, selection=None, series=None, force=False):
                 print("  [!] Aucune image trouvée : le site a peut-être changé (voir image_extensions dans config.toml).")
                 continue
 
+            if force and pages_dir.is_dir():
+                shutil.rmtree(pages_dir)  # sinon les anciennes pages 001… seraient gardées
             pages_dir.mkdir(parents=True, exist_ok=True)
             print(f"  {len(urls)} images.")
             with ThreadPoolExecutor(max_workers=sc["workers"]) as pool:

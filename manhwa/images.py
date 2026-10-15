@@ -37,6 +37,18 @@ def write_jpeg(path, img, quality=92):
     buf.tofile(str(path))
 
 
+def dominant_width(sizes):
+    """Largeur des vraies pages : celle qui couvre le plus de hauteur au total.
+
+    `sizes` = [(largeur, hauteur)]. Les bannières et vignettes sont rares et courtes,
+    elles ne l'emportent jamais sur les pages du chapitre.
+    """
+    totals = {}
+    for w, h in sizes:
+        totals[w] = totals.get(w, 0) + h
+    return max(totals, key=totals.get) if totals else None
+
+
 def load_strip(files, max_width):
     """Empile les pages en un seul long strip, toutes à la même largeur.
 
@@ -54,7 +66,8 @@ def load_strip(files, max_width):
     if not imgs:
         return None, []
 
-    target_w = min(min(im.shape[1] for im in imgs), max_width)
+    # largeur des vraies pages (et non la plus petite image, qui rendait tout flou)
+    target_w = min(dominant_width([(im.shape[1], im.shape[0]) for im in imgs]), max_width)
     resized = []
     for im in imgs:
         h, w = im.shape[:2]

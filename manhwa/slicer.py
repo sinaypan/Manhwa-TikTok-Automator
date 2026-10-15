@@ -173,7 +173,8 @@ def run_slicer(chapter, cfg):
 
     def mouse_cb(event, x, y, flags, param):
         if event == cv2.EVENT_MOUSEWHEEL:
-            direction = -1 if cv2.getMouseWheelDelta(flags) > 0 else 1
+            # le sens est dans le signe de flags (positif = molette vers le haut)
+            direction = -1 if flags > 0 else 1
             state["view_y"] += direction * step * 4
             return
         crop.on_mouse(event, int(x * W / PREVIEW_W), int(y * view_h / PREVIEW_H), W, view_h)
