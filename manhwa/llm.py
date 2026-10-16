@@ -81,6 +81,9 @@ def chat(messages, json_mode=True, temperature=0.2, max_tokens=4000, timeout=180
     body = {"model": s["model"], "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
     if json_mode:
         body["response_format"] = {"type": "json_object"}
+        if not any("json" in str(m.get("content", "")).lower() for m in messages):
+            # Azure (derrière le proxy) refuse une réponse JSON si le mot « json » n'apparaît nulle part
+            body["messages"] = [{"role": "system", "content": "Answer only with JSON."}] + list(messages)
     last = None
     for attempt in range(4):
         try:
@@ -112,4 +115,4 @@ def chat(messages, json_mode=True, temperature=0.2, max_tokens=4000, timeout=180
 
 
 def ping():
-    return chat([{"role": "user", "content": 'Reply with {"ok": true}'}], max_tokens=20).get("ok") is True
+    return chat([{"role": "user", "content": 'Reply with this JSON: {"ok": true}'}], max_tokens=20).get("ok") is True

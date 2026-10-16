@@ -296,3 +296,19 @@ def test_expressive_voice_carries_the_emotion():
     from manhwa import chatterbox_tts
 
     assert chatterbox_tts.INTENSITY["shouting"] > chatterbox_tts.INTENSITY["neutral"] > chatterbox_tts.INTENSITY["sad"]
+
+
+def test_json_requests_always_mention_json(monkeypatch):
+    llm.save_settings(base="https://x/v1", key="sk-test-123456")
+    sent = []
+
+    class Ok:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"ok": true}'}}]}
+
+    monkeypatch.setattr(llm.requests, "post", lambda url, json, **k: sent.append(json) or Ok())
+    assert llm.ping()
+    llm.chat([{"role": "user", "content": "Say hi"}])  # le proxy (Azure) exige le mot « json »
+    assert all(any("json" in m["content"].lower() for m in body["messages"]) for body in sent)
