@@ -55,6 +55,8 @@ const ICONS = {
   users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
   plus: 'M12 5v14M5 12h14',
   x: 'M18 6 6 18M6 6l12 12',
+  edit: 'M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z',
+  eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
 };
 
 /* ---------- Outils ---------- */
@@ -110,6 +112,62 @@ function toast(message, action) {
   toastTimer = setTimeout(() => (box.hidden = true), 4500);
 }
 
+/* ---------- À faire, puis déjà fait : ce qu'on vient de décider reste quelques secondes (on peut changer
+   d'avis), puis se range tout en bas ; la suivante prend sa place, sans avoir à défiler ---------- */
+
+const settleTimers = new Map();
+
+function settle(key, seconds, done) {
+  clearTimeout(settleTimers.get(key));
+  const find = () => document.querySelector(`.queue > [data-key="${CSS.escape(key)}"]`);
+  const row = find();
+  if (!row) return;
+  row.style.setProperty('--settle', `${seconds}s`);
+  row.classList.remove('settling');
+  void row.offsetWidth;
+  row.classList.add('settling');
+  settleTimers.set(
+    key,
+    setTimeout(() => {
+      settleTimers.delete(key);
+      const live = find();
+      if (!live) return done();
+      live.style.height = `${live.offsetHeight}px`;
+      void live.offsetWidth;
+      live.classList.add('leaving');
+      setTimeout(done, 300);
+    }, seconds * 1000),
+  );
+}
+
+function unsettle(key) {
+  clearTimeout(settleTimers.get(key));
+  settleTimers.delete(key);
+}
+
+function doneList(id, title, rows) {
+  return el(
+    'details',
+    { class: 'done-list', id, open: state.openDone.has(id), hidden: !rows.length, ontoggle: (e) => (e.currentTarget.open ? state.openDone.add(id) : state.openDone.delete(id)) },
+    el('summary', {}, icon('check'), title, el('span', { class: 'muted', text: ' · cliquer pour voir ou changer d’avis' })),
+    el('div', { class: 'lines' }, rows),
+  );
+}
+
+function afterSettle(key, fresh) {
+  // la ligne quitte la file ; compteurs et liste du bas sont refaits (pas la file : rien ne saute)
+  const old = document.getElementById(fresh.id);
+  if (!old) return;
+  old.querySelector(`.queue > [data-key="${CSS.escape(key)}"]`)?.remove();
+  for (const sel of ['.block-head', '.bar', '.done-list']) {
+    const a = old.querySelector(sel);
+    const b = fresh.querySelector(sel);
+    if (a && b) a.replaceWith(b);
+  }
+  const queue = old.querySelector('.queue');
+  if (queue && !queue.children.length) queue.replaceWith(fresh.querySelector('.queue-empty') || el('div'));
+}
+
 /* ---------- État ---------- */
 
 const state = {
@@ -125,8 +183,14 @@ const state = {
   screen: 'cut', // 'cut' (Découpe) ou 'cast' (Personnages)
   cast: null, // détail renvoyé par /api/cast
   sel: new Set(), // visages sélectionnés (à ranger)
-  lineFilter: 'todo', // répliques : 'todo' (à valider) ou 'all'
-  pendingKeys: new Set(), // répliques « à valider » à l'ouverture (restent affichées une fois validées)
+  pendingKeys: new Set(), // répliques encore à valider (une validée y reste 5 s, puis se range en bas)
+  soundKeys: new Set(), // sons encore à choisir (même principe, 3 s)
+  openDone: new Set(), // listes « déjà faits » et blocs repliables ouverts
+  openFaces: new Set(), // personnages dont on voit tous les visages
+  autoScene: new Set(), // chapitres dont on a déjà lancé « ce que montrent les cases » tout seul
+  editing: null, // relecture : la proposition que l'on corrige soi-même
+  reviewRecent: [], // relecture : les dernières décisions (en tête de « Déjà décidées »)
+  reviewInflight: 0,
   autoAnalyzed: new Set(), // chapitres dont on a déjà lancé la recherche de visages tout seul
 };
 
@@ -324,6 +388,21 @@ function switchScreen(screen) {
   $('main').scrollTop = 0;
 }
 
+// Le bouton vidéo dit si tes derniers changements (voix, sons, textes) y sont déjà
+function videoButton(running) {
+  const p = findEpisode(state.chapter.id)?.progress || state.chapter.progress;
+  const upToDate = p && p.done === p.total;
+  const stale = p?.video && !upToDate;
+  if (running) return el('button', { type: 'button', class: 'pill accent', disabled: true }, el('span', { class: 'spinner light' }), 'En cours…');
+  if (upToDate) return el('button', { type: 'button', class: 'pill', title: 'La vidéo contient tous tes changements', onclick: () => switchScreen('video') }, icon('check'), 'Vidéo à jour');
+  return el(
+    'button',
+    { type: 'button', class: `pill accent${stale ? ' pulse' : ''}`, title: stale ? 'Tu as changé des voix, des sons ou des textes depuis la dernière vidéo : elle ne les contient pas encore' : '', onclick: makeVideo },
+    icon(stale ? 'reset' : 'play'),
+    stale ? 'Mettre à jour la vidéo' : 'Créer la vidéo',
+  );
+}
+
 function renderHead() {
   const ch = state.chapter;
   const head = $('#head');
@@ -337,17 +416,17 @@ function renderHead() {
     head.replaceChildren(
       el('div', { class: 'titles' }, title, el('p', { text: v ? `${plural(v.timeline.length, 'case', 'cases')} · ${todo} passage${todo > 1 ? 's' : ''} à corriger` : 'Vidéo' })),
       screenTabs(),
-      el('div', { class: 'actions' }, el('button', { type: 'button', class: 'pill accent', disabled: running, onclick: makeVideo }, running ? el('span', { class: 'spinner light' }) : icon('play'), running ? 'En cours…' : 'Créer la vidéo')),
+      el('div', { class: 'actions' }, videoButton(running)),
     );
     return;
   }
   if (state.screen === 'sounds') {
     const s = state.sounds;
-    const set = s ? s.spots.filter((x) => x.sound !== s.none).length : 0;
+    const set = s ? [...s.spots, ...s.actions].filter((x) => x.sound !== s.none).length : 0;
     head.replaceChildren(
-      el('div', { class: 'titles' }, title, el('p', { text: s ? `${plural(s.spots.length, 'bruitage', 'bruitages')} · ${set} avec un son` : 'Sons' })),
+      el('div', { class: 'titles' }, title, el('p', { text: s ? `${state.soundKeys.size} à choisir · ${set} avec un son dans la vidéo` : 'Sons' })),
       screenTabs(),
-      el('div', { class: 'actions' }, el('button', { type: 'button', class: 'pill accent', disabled: running, onclick: makeVideo }, running ? el('span', { class: 'spinner light' }) : icon('play'), running ? 'En cours…' : 'Créer la vidéo')),
+      el('div', { class: 'actions' }, videoButton(running)),
     );
     return;
   }
@@ -361,6 +440,7 @@ function renderHead() {
         'div',
         { class: 'actions' },
         r?.done ? el('button', { type: 'button', class: 'pill', disabled: running, title: 'Relire tout le chapitre (tes décisions sont gardées)', onclick: runReview }, running ? el('span', { class: 'spinner' }) : icon('reset'), 'Relire à nouveau') : null,
+        videoButton(running),
       ),
     );
     return;
@@ -376,6 +456,7 @@ function renderHead() {
         'div',
         { class: 'actions' },
         el('button', { type: 'button', class: 'pill', title: 'Chercher à nouveau les visages (garde ce que tu as rangé)', disabled: running || !c?.frames, onclick: () => analyzeFaces(true) }, running ? el('span', { class: 'spinner' }) : icon('reset'), 'Revoir les visages'),
+        videoButton(running),
       ),
     );
     return;
@@ -396,7 +477,7 @@ function renderHead() {
       el('button', { type: 'button', class: 'pill', title: 'Revenir à la découpe automatique', onclick: resetCuts }, icon('reset'), 'Auto'),
       el('button', { type: 'button', class: 'pill', title: 'Comment ça marche', 'aria-label': 'Comment ça marche', onclick: () => { state.introOpen = true; renderSide(); $('#side').scrollTop = 0; } }, '?'),
       el('button', { type: 'button', class: 'pill', disabled: running, title: 'Tout d’un coup : visages, relecture GPT, voix, sons, puis la vidéo', onclick: runAuto }, icon('sparkles'), 'Tout faire'),
-      el('button', { type: 'button', class: 'pill accent', disabled: running, onclick: makeVideo }, running ? el('span', { class: 'spinner light' }) : icon('play'), running ? 'En cours…' : 'Créer la vidéo'),
+      videoButton(running),
     ),
   );
 }
@@ -900,7 +981,6 @@ async function openCast() {
   try {
     const c = await api(`/api/cast?id=${enc(id)}`);
     if (state.chapter?.id !== id || state.screen !== 'cast') return;
-    if (state.focusFrame) state.lineFilter = 'all';
     setCast(c, true);
     focusFrameRow();
   } catch (e) {
@@ -976,14 +1056,14 @@ function charsSection() {
       el('div', { class: 'grow' }, el('h3', { text: 'Personnages' }), el('p', { class: 'muted', text: 'Donne un nom à chaque groupe (ou clique sur un nom du wiki). Un visage mal rangé ? Clique dessus, puis sur le bon personnage dans la barre du bas.' })),
       el('div', { class: 'head-actions' }, voicesHead(), wikiStatus()),
     ),
-    el('div', { class: 'cast-grid' }, narratorCard(), extrasCard(), cards),
+    el('div', { class: 'cast-grid voices' }, narratorCard(), extrasCard()),
+    el('div', { class: 'cast-grid packed' }, cards),
     silent.length
       ? el(
-          'div',
-          { class: 'silent-block' },
-          el('h4', { text: 'Ne parlent pas' }),
-          el('p', { class: 'muted', text: 'Jamais proposés pour une réplique. Clique sur « Parle » pour les remettre.' }),
-          el('div', { class: 'cast-grid' }, silent.map(charCard)),
+          'details',
+          { class: 'silent-block', open: state.openDone.has('silent'), ontoggle: (e) => (e.currentTarget.open ? state.openDone.add('silent') : state.openDone.delete('silent')) },
+          el('summary', {}, el('b', { text: `Ne parlent pas · ${silent.length}` }), el('span', { class: 'muted', text: ' · jamais proposés pour une réplique (« Parle » pour en remettre un)' })),
+          el('div', { class: 'cast-grid packed' }, silent.map(charCard)),
         )
       : null,
     elsewhere.length ? el('p', { class: 'muted elsewhere', text: `Déjà vus dans la série : ${elsewhere.map((ch) => charLabel(ch.id)).join(', ')}.` }) : null,
@@ -994,6 +1074,24 @@ function charsSection() {
 }
 
 const person = (wid) => state.cast.people.find((w) => w.id === wid);
+const FACES_SHOWN = 4; // une rangée ; au-delà, la carte se replie (« +12 ») : les cartes gardent la même taille
+
+function facesList(ch) {
+  const many = ch.faces.length > FACES_SHOWN + 1;
+  const open = !many || state.openFaces.has(ch.id);
+  const toggle = () => {
+    if (state.openFaces.has(ch.id)) state.openFaces.delete(ch.id);
+    else state.openFaces.add(ch.id);
+    document.querySelector(`.who[data-char="${CSS.escape(ch.id)}"] .faces`)?.replaceWith(facesList(ch));
+  };
+  return el(
+    'div',
+    { class: 'faces' },
+    (open ? ch.faces : ch.faces.slice(0, FACES_SHOWN)).map(faceThumb),
+    many ? el('button', { type: 'button', class: 'more-faces', title: open ? 'Replier' : 'Voir tous ses visages', onclick: toggle }, open ? 'Replier' : `+${ch.faces.length - FACES_SHOWN}`) : null,
+  );
+}
+
 
 function charCard(ch) {
   return el(
@@ -1026,7 +1124,7 @@ function charCard(ch) {
     ),
     wikiLine(ch),
     ch.silent ? null : voiceRow(ch),
-    el('div', { class: 'faces' }, ch.faces.map(faceThumb)),
+    facesList(ch),
     el(
       'div',
       { class: 'who-foot' },
@@ -1344,37 +1442,30 @@ function linesSection() {
   const c = state.cast;
   const total = c.lines.length;
   const done = c.lines.filter((l) => l.speaker).length;
-  const proposals = c.lines.filter((l) => !l.speaker && l.suggestion).length;
-  const shown = state.lineFilter === 'todo' ? c.lines.filter((l) => state.pendingKeys.has(l.key)) : c.lines;
-  const setFilter = (key) => {
-    state.lineFilter = key;
-    state.pendingKeys = new Set(c.lines.filter((l) => !l.speaker).map((l) => l.key));
-    $('#speak').replaceWith(linesSection());
-  };
-  const filter = el(
-    'div',
-    { class: 'tabs small' },
-    [
-      ['todo', `À valider · ${total - done}`],
-      ['all', `Toutes · ${total}`],
-    ].map(([key, label]) => el('button', { type: 'button', class: state.lineFilter === key ? 'on' : '', onclick: () => setFilter(key) }, label)),
-  );
+  const queue = c.lines.filter((l) => state.pendingKeys.has(l.key));
+  const rest = c.lines.filter((l) => !state.pendingKeys.has(l.key));
+  const proposals = queue.filter((l) => !l.speaker && l.suggestion).length;
   let body;
-  if (!c.ocr_done) body = el('p', { class: 'muted', text: 'Le texte n’a pas encore été lu : crée d’abord la vidéo.' });
-  else if (!total) body = el('p', { class: 'muted', text: 'Aucune réplique dans ce chapitre.' });
-  else if (!shown.length) body = el('div', { class: 'notice' }, icon('check'), el('p', { text: 'Toutes les répliques ont leur personnage.' }));
-  else body = el('div', { class: 'lines' }, shown.map(lineRow));
+  if (!c.ocr_done) body = [el('p', { class: 'muted', text: 'Le texte n’a pas encore été lu : crée d’abord la vidéo.' })];
+  else if (!total) body = [el('p', { class: 'muted', text: 'Aucune réplique dans ce chapitre.' })];
+  else
+    body = [
+      queue.length
+        ? el('div', { class: 'lines queue', id: 'speak-queue' }, queue.map(lineRow))
+        : el('div', { class: 'notice queue-empty' }, icon('check'), el('p', { text: 'Toutes les répliques ont leur personnage. Pour changer d’avis : « Déjà validées », juste dessous.' })),
+      doneList('speak-done', `Déjà validées · ${rest.length}`, rest.map(lineRow)),
+    ];
   return el(
     'section',
     { class: 'cast-block', id: 'speak' },
     el(
       'div',
       { class: 'block-head row' },
-      el('div', { class: 'grow' }, el('h3', { text: 'Qui parle' }), el('p', { class: 'muted', text: 'Clique sur la bonne tête, sur l’image ou dessous. En pointillés : la proposition. Servira à donner une voix à chaque personnage.' })),
-      el('div', { class: 'actions' }, filter, proposals ? el('button', { type: 'button', class: 'pill accent', onclick: acceptProposals }, icon('check'), `Valider les ${proposals} propositions`) : null),
+      el('div', { class: 'grow' }, el('h3', { text: `Qui parle · ${queue.length} à valider` }), el('p', { class: 'muted', text: 'Clique sur la bonne tête, sur l’image ou dessous (en pointillés : la proposition). La réplique se range en bas au bout de 5 secondes et la suivante prend sa place : tu peux changer d’avis avant, ou plus tard dans « Déjà validées ».' })),
+      el('div', { class: 'actions' }, proposals ? el('button', { type: 'button', class: 'pill accent', onclick: acceptProposals }, icon('check'), `Valider les ${proposals} propositions`) : null),
     ),
     el('div', { class: 'bar' }, el('span', { style: `width:${total ? (100 * done) / total : 0}%` })),
-    body,
+    ...body,
   );
 }
 
@@ -1449,6 +1540,14 @@ async function setSpeaker(l, cid) {
     if (fresh) document.querySelector(`.line-row[data-key="${CSS.escape(l.key)}"]`)?.replaceWith(lineRow(fresh));
     refreshSpeakHead();
     renderHead();
+    if (state.pendingKeys.has(l.key)) {
+      if (fresh?.speaker)
+        settle(l.key, 5, () => {
+          state.pendingKeys.delete(l.key);
+          afterSettle(l.key, linesSection());
+        });
+      else unsettle(l.key);
+    }
     const face = nearestFace(fresh || l);
     if (face && cid && face.char !== cid && state.cast.characters.some((c) => c.id === cid)) {
       // le visage le plus proche de la bulle porte un autre nom : c'est peut-être lui qui est mal rangé
@@ -1499,19 +1598,21 @@ function refreshSpeakHead() {
   if (!old) return;
   const fresh = linesSection();
   old.querySelector('.block-head').replaceWith(fresh.querySelector('.block-head'));
-  old.querySelector('.bar').replaceWith(fresh.querySelector('.bar'));
+  old.querySelector('.bar')?.replaceWith(fresh.querySelector('.bar'));
 }
 
 async function acceptProposals() {
   const todo = state.cast.lines.filter((l) => !l.speaker && l.suggestion);
   try {
     await sendSpeakers(todo.map((l) => ({ key: l.key, char: l.suggestion })));
+    for (const l of todo) state.pendingKeys.delete(l.key);
     $('#speak').replaceWith(linesSection());
     renderHead();
     toast(plural(todo.length, 'réplique validée', 'répliques validées'), {
       label: 'Annuler',
       run: async () => {
         await sendSpeakers(todo.map((l) => ({ key: l.key, char: null })));
+        for (const l of todo) state.pendingKeys.add(l.key);
         $('#speak')?.replaceWith(linesSection());
         renderHead();
       },
@@ -1542,6 +1643,14 @@ async function onCastJob(before, after) {
 const player = new Audio();
 let playing = null; // bouton ▶ en cours
 
+function voiceOf(char) {
+  const c = state.cast;
+  if (!c) return null;
+  if (char === c.narrator) return c.narrator_voice;
+  if (c.extras?.[char]) return c.extras[char].voice;
+  return c.characters.find((x) => x.id === char)?.voice || null;
+}
+
 function playSample(button, params) {
   // un deuxième clic sur le même bouton arrête l'extrait
   if (playing === button && !player.paused) {
@@ -1553,7 +1662,8 @@ function playSample(button, params) {
   playing?.classList.remove('on');
   playing = button;
   button.classList.add('on', 'loading');
-  const q = new URLSearchParams({ id: state.chapter.id, ...params });
+  const v = voiceOf(params.char);
+  const q = new URLSearchParams({ id: state.chapter.id, ...(v ? { name: v.name, pitch: v.pitch || '+0Hz', rate: v.rate || '+0%' } : {}), ...params });
   player.src = `/api/voice_sample?${q}`;
   player.play().catch(() => toast('Extrait impossible (connexion à la voix ?)')).finally(() => button.classList.remove('loading'));
   player.onended = () => {
@@ -1585,9 +1695,9 @@ function voiceRow(ch) {
     el('button', { type: 'button', class: 'play', title: 'Écouter une de ses répliques', 'aria-label': 'Écouter', onclick: (e) => playSample(e.currentTarget, { char: ch.id }) }, icon('play')),
     voiceSelect(v.name, (name) => updateChar(ch.id, { voice: { ...v, name } })),
     el('span', { class: 'pitch' },
-      el('button', { type: 'button', class: 'link quiet', title: 'Plus grave', onclick: () => shift(-3) }, '−'),
+      el('button', { type: 'button', class: 'link quiet', title: 'Plus grave', onclick: () => shift(-6) }, '−'),
       el('span', { class: 'muted', text: pitch ? `${pitch > 0 ? '+' : ''}${pitch} Hz` : 'hauteur' }),
-      el('button', { type: 'button', class: 'link quiet', title: 'Plus aigu', onclick: () => shift(3) }, '+')),
+      el('button', { type: 'button', class: 'link quiet', title: 'Plus aigu', onclick: () => shift(6) }, '+')),
     ch.voice_ok
       ? el('span', { class: 'voice-ok' }, icon('check'), 'validée')
       : el('button', { type: 'button', class: 'chip-btn plain proposed', title: v.reason || '', onclick: () => updateChar(ch.id, { voice_ok: true }) }, icon('check'), 'Valider'),
@@ -1767,53 +1877,183 @@ function renderReview() {
         el('button', { type: 'button', class: 'pill accent', onclick: runReview }, icon('sparkles'), 'Relire le chapitre')),
     );
   }
-  for (const field of ['text', 'kind', 'speaker']) {
-    const items = r.items.filter((x) => x.field === field);
-    if (!items.length) continue;
-    const pending = items.filter((x) => x.state === 'pending');
-    const order = { pending: 0, accepted: 1, rejected: 2 };
-    items.sort((a, b) => order[a.state] - order[b.state]);
-    const [title, help] = FIELD_TITLES[field];
+  if (r.items.length) {
+    const pending = r.items.filter((x) => x.state === 'pending');
+    const rank = (x) => {
+      const i = state.reviewRecent.indexOf(`${x.key}:${x.field}`);
+      return i < 0 ? 1e9 : i;
+    };
+    const decided = r.items.filter((x) => x.state !== 'pending').sort((a, b) => rank(a) - rank(b));
+    const yes = decided.filter((x) => x.state === 'accepted').length;
     parts.push(
-      el(
-        'section',
-        { class: 'cast-block' },
-        el('div', { class: 'block-head row' },
-          el('div', { class: 'grow' }, el('h3', { text: `${title} · ${items.length}` }), el('p', { class: 'muted', text: help })),
-          pending.length ? el('div', { class: 'actions' },
-            el('button', { type: 'button', class: 'pill', onclick: () => decide(pending, 'rejected') }, 'Tout refuser'),
-            el('button', { type: 'button', class: 'pill accent', onclick: () => decide(pending, 'accepted') }, icon('check'), `Tout accepter (${pending.length})`)) : null),
-        el('div', { class: 'lines' }, items.map(reviewRow)),
-      ),
+      pending.length
+        ? reviewFocus(pending[0], pending.length)
+        : el('div', { class: 'notice' }, icon('check'), el('p', { text: `Tout est décidé : ${yes} acceptées, ${decided.length - yes} refusées. Pour changer d’avis : la liste juste dessous.` })),
+      doneList('review-done', `Déjà décidées · ${yes} acceptées, ${decided.length - yes} refusées`, decided.map(reviewRow)),
     );
   }
   if (r.done && !r.items.length) parts.push(el('div', { class: 'notice' }, icon('check'), el('p', { text: 'GPT n’a rien trouvé à corriger.' })));
   box.replaceChildren(...parts);
 }
 
-function reviewRow(item) {
-  const r = state.review;
+function reviewView(item, ratio) {
   const [, , w] = item.crop;
   const cy = item.box[1] + item.box[3] / 2;
-  const h = Math.min(item.crop[3], Math.round(0.55 * w));
-  const view = [0, Math.max(0, Math.min(item.crop[3] - h, Math.round(cy - h / 2))), w, h];
-  const label = (v) => (item.field === 'kind' ? r.kinds[v] || v : v ?? '—');
+  const h = Math.min(item.crop[3], Math.round(ratio * w));
+  return [0, Math.max(0, Math.min(item.crop[3] - h, Math.round(cy - h / 2))), w, h];
+}
+
+function reviewShot(item, view, width) {
+  return el(
+    'div',
+    { class: 'shot', style: `aspect-ratio:${view[2]}/${view[3]}`, onmouseenter: (e) => showContext(e.currentTarget, item.crop, [['bubble-box', item.box]]), onmouseleave: hidePeek },
+    el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(item.frame)}&y=${view[1]}&h=${view[3]}&w=${width}`, alt: '', loading: 'lazy' }),
+    el('span', { class: 'bubble-box', style: boxStyle(item.box, view) }),
+  );
+}
+
+const reviewLabel = (item, v) => (item.field === 'kind' ? state.review.kinds[v] || v : v ?? '—');
+
+function reviewChange(item) {
+  if (item.field === 'text') return el('div', { class: 'diff' }, el('p', { class: 'old', text: item.old }), el('p', { class: 'new' }, ...diffWords(item.old, item.new)));
+  return [el('p', { class: 'quote' }, `« ${item.text} »`), el('p', { class: 'change' }, el('span', { class: 'muted', text: reviewLabel(item, item.old) }), ' → ', el('b', { text: reviewLabel(item, item.new) }))];
+}
+
+function reviewFocus(item, left) {
+  // la proposition à décider, seule et en grand : Accepter / Refuser, et la suivante arrive à sa place
+  const r = state.review;
+  const [title, help] = FIELD_TITLES[item.field];
+  const id = `${item.key}:${item.field}`;
+  const editing = state.editing === id;
+  const pending = r.items.filter((x) => x.state === 'pending');
+  let body;
+  if (editing) {
+    body = [
+      el('p', { class: 'muted', text: 'Lu sur l’image :' }),
+      el('p', { class: 'old-plain', text: item.old }),
+      el('textarea', { class: 'field edit-text', id: 'edit-text', rows: 3, spellcheck: 'false', text: item.new }),
+    ];
+  } else body = [reviewChange(item)];
+  const kinds = item.field === 'kind' && !editing
+    ? el('div', { class: 'who-chips' }, el('span', { class: 'muted', text: 'Ou plutôt :' }),
+        Object.entries(r.kinds).filter(([k]) => k !== item.new && k !== item.old).map(([k, label]) => el('button', { type: 'button', class: 'chip-btn plain', onclick: () => decideOne(item, 'accepted', k) }, label)))
+    : null;
+  const key = (k) => el('kbd', { text: k });
+  return el(
+    'div',
+    { class: 'card review-focus', 'data-key': id },
+    el('div', { class: 'focus-head' },
+      el('span', { class: 'chip', text: title }),
+      el('span', { class: 'muted grow', text: `${plural(left, 'proposition', 'propositions')} à décider` }),
+      el('button', { type: 'button', class: 'link quiet', onclick: () => decide(pending, 'accepted') }, `Tout accepter (${pending.length})`)),
+    el('div', { class: 'focus-body' },
+      reviewShot(item, reviewView(item, 0.75), 720),
+      el('div', { class: 'line-body' }, body, kinds, el('p', { class: 'muted small', text: help }))),
+    el('div', { class: 'focus-actions' },
+      editing
+        ? [
+            el('button', { type: 'button', class: 'pill big', onclick: () => { state.editing = null; renderReview(); } }, 'Annuler'),
+            el('button', { type: 'button', class: 'pill accent big', onclick: saveEdit }, icon('check'), 'Valider ma version', key('Entrée')),
+          ]
+        : [
+            el('button', { type: 'button', class: 'pill big', onclick: () => decideOne(item, 'rejected') }, icon('x'), 'Refuser', key('R')),
+            item.field === 'text' ? el('button', { type: 'button', class: 'pill big', onclick: () => editItem(item) }, icon('edit'), 'Corriger moi-même', key('E')) : null,
+            el('button', { type: 'button', class: 'pill accent big', onclick: () => decideOne(item, 'accepted') }, icon('check'), 'Accepter', key('A')),
+          ]),
+  );
+}
+
+function editItem(item) {
+  state.editing = `${item.key}:${item.field}`;
+  renderReview();
+  const box = $('#edit-text');
+  box?.focus();
+  box?.setSelectionRange(box.value.length, box.value.length);
+}
+
+function saveEdit() {
+  const item = currentReviewItem();
+  const value = $('#edit-text')?.value.trim();
+  if (!item || !value) return;
+  decideOne(item, 'accepted', value);
+}
+
+function currentReviewItem() {
+  return state.review?.items.find((x) => x.state === 'pending') || null;
+}
+
+function reviewRow(item) {
+  // une proposition déjà décidée : son état en clair, et de quoi changer d'avis
+  const view = reviewView(item, 0.55);
+  const accepted = item.state === 'accepted';
   return el(
     'div',
     { class: `line-row review ${item.state}`, 'data-key': `${item.key}:${item.field}` },
-    el('div', { class: 'shot', style: `aspect-ratio:${view[2]}/${view[3]}`, onmouseenter: (e) => showContext(e.currentTarget, item.crop, [['bubble-box', item.box]]), onmouseleave: hidePeek },
-      el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(item.frame)}&y=${view[1]}&h=${view[3]}`, alt: '', loading: 'lazy' }),
-      el('span', { class: 'bubble-box', style: boxStyle(item.box, view) })),
+    reviewShot(item, view, 360),
     el('div', { class: 'line-body' },
-      item.field === 'text'
-        ? el('div', { class: 'diff' }, el('p', { class: 'old', text: item.old }), el('p', { class: 'new' }, ...diffWords(item.old, item.new)))
-        : el('p', { class: 'quote' }, `« ${item.text} »`),
-      item.field !== 'text' ? el('p', { class: 'change' }, el('span', { class: 'muted', text: label(item.old) }), ' → ', el('b', { text: label(item.new) })) : null,
+      reviewChange(item),
       el('div', { class: 'who-chips' },
-        el('button', { type: 'button', class: `chip-btn plain${item.state === 'accepted' ? ' on' : ''}`, onclick: () => decide([item], item.state === 'accepted' ? 'pending' : 'accepted') }, icon('check'), item.state === 'accepted' ? 'Accepté' : 'Accepter'),
-        el('button', { type: 'button', class: `chip-btn plain${item.state === 'rejected' ? ' refused' : ''}`, onclick: () => decide([item], item.state === 'rejected' ? 'pending' : 'rejected') }, icon('x'), item.state === 'rejected' ? 'Refusé' : 'Refuser'))),
+        item.state === 'pending'
+          ? [el('button', { type: 'button', class: 'chip-btn plain', onclick: () => decideOne(item, 'accepted') }, icon('check'), 'Accepter'),
+             el('button', { type: 'button', class: 'chip-btn plain', onclick: () => decideOne(item, 'rejected') }, icon('x'), 'Refuser')]
+          : [el('span', { class: `state-badge ${item.state}` }, icon(accepted ? 'check' : 'x'), accepted ? 'Acceptée' : 'Refusée (on garde l’original)'),
+             el('button', { type: 'button', class: 'link quiet', onclick: () => decideOne(item, accepted ? 'rejected' : 'accepted') }, accepted ? 'Refuser plutôt' : 'Accepter plutôt'),
+             el('button', { type: 'button', class: 'link quiet', onclick: () => decideOne(item, 'pending') }, 'Remettre à décider')])),
   );
 }
+
+async function decideOne(item, stateName, value) {
+  // tout de suite à l'écran (la suivante arrive), enregistré derrière
+  const id = state.chapter.id;
+  const before = { state: item.state, new: item.new };
+  const tag = `${item.key}:${item.field}`;
+  item.state = stateName;
+  if (value != null) item.new = value;
+  state.editing = null;
+  state.reviewRecent = [tag, ...state.reviewRecent.filter((k) => k !== tag)];
+  const top = $('main').scrollTop;
+  renderReview();
+  $('main').scrollTop = top;
+  if (stateName !== 'pending') toast(`${stateName === 'accepted' ? 'Acceptée' : 'Refusée'} : « ${item.text.slice(0, 30)}${item.text.length > 30 ? '…' : ''} »`, { label: 'Annuler', run: () => decideOne(item, 'pending') });
+  state.reviewInflight += 1;
+  try {
+    const res = await api(`/api/review/decide?id=${enc(id)}`, { method: 'POST', body: JSON.stringify({ decisions: [{ key: item.key, field: item.field, state: stateName, ...(value != null ? { value } : {}) }] }) });
+    state.reviewInflight -= 1;
+    if (state.chapter?.id !== id || state.reviewInflight) return; // d'autres clics suivent : on attend le dernier
+    state.review = res;
+    renderHead();
+  } catch (e) {
+    state.reviewInflight -= 1;
+    item.state = before.state;
+    item.new = before.new;
+    if (state.screen === 'review') renderReview();
+    toast(`Non enregistré : ${e.message}`);
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  // relecture au clavier : A accepter, R refuser, E corriger soi-même
+  if (state.screen !== 'review' || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.id === 'edit-text') {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      saveEdit();
+    } else if (e.key === 'Escape') {
+      state.editing = null;
+      renderReview();
+    }
+    return;
+  }
+  if (e.target.closest('input, textarea, select')) return;
+  const item = currentReviewItem();
+  if (!item || state.editing) return;
+  const k = e.key.toLowerCase();
+  if (k === 'a' || k === 'enter') decideOne(item, 'accepted');
+  else if (k === 'r') decideOne(item, 'rejected');
+  else if (k === 'e' && item.field === 'text') editItem(item);
+  else return;
+  e.preventDefault();
+});
 
 function diffWords(a, b) {
   // les mots nouveaux en couleur : on voit tout de suite ce que GPT a changé
@@ -1908,11 +2148,43 @@ async function openSounds() {
   try {
     const s = await api(`/api/sounds?id=${enc(id)}`);
     if (state.chapter?.id !== id || state.screen !== 'sounds') return;
-    state.sounds = s;
-    renderSounds();
+    setSounds(s, true);
     focusFrameRow();
   } catch (e) {
     $('#sounds').replaceChildren(el('div', { class: 'notice error' }, icon('alert'), el('p', { text: `Impossible d’ouvrir les sons : ${e.message}` })));
+  }
+}
+
+function soundItems() {
+  const s = state.sounds;
+  const order = (x) => `${x.frame}:${x.key.startsWith('frame:') ? 1 : 0}`;
+  return [...s.spots, ...s.actions].sort((a, b) => order(a).localeCompare(order(b)));
+}
+
+function setSounds(s, fresh = false) {
+  state.sounds = s;
+  if (fresh) state.soundKeys = new Set([...s.spots, ...s.actions].filter((x) => !x.chosen).map((x) => x.key));
+  // première visite : on regarde ce que montrent les cases (en local, ≈ 15 s), sans clic à faire
+  const id = state.chapter.id;
+  const job = findEpisode(id)?.job || s.job;
+  if (!s.scene_done && s.ocr_done && !isRunning(job) && !state.autoScene.has(id)) {
+    state.autoScene.add(id);
+    lookAtPanels();
+  }
+  renderSounds();
+}
+
+async function lookAtPanels() {
+  const id = state.chapter.id;
+  try {
+    const job = await api(`/api/sounds/scene?id=${enc(id)}`, { method: 'POST' });
+    const ep = findEpisode(id);
+    if (ep) ep.job = job;
+    if (state.sounds) state.sounds.job = job;
+    renderSounds();
+    schedulePoll(500);
+  } catch (e) {
+    toast(`Impossible de regarder les cases : ${e.message}`);
   }
 }
 
@@ -1950,43 +2222,37 @@ function renderSounds() {
     ),
   ];
   const job = findEpisode(state.current)?.job || s.job;
-  if (job?.kind === 'sounds' && (isRunning(job) || job.status === 'error')) parts.push(jobCard(job));
+  if (['sounds', 'scene'].includes(job?.kind) && (isRunning(job) || job.status === 'error')) parts.push(jobCard(job));
   if (!s.ocr_done) parts.push(el('div', { class: 'notice' }, icon('alert'), el('p', { text: 'Crée d’abord la vidéo : les bruitages sont repérés à la lecture du texte.' })));
-  else {
-    if (s.spots.length) {
-      parts.push(
-        el('section', { class: 'cast-block' },
-          el('div', { class: 'block-head' },
-            el('h3', { id: 'spots-title', text: spotsTitle() }),
-            el('p', { class: 'muted', text: 'Les onomatopées dessinées. Clique sur un son pour l’écouter et le choisir. En pointillés : la proposition de GPT. Le son part au début de la case, sous la voix. Survole l’image pour voir la scène.' })),
-          el('div', { class: 'lines' }, s.spots.map(soundRow))),
-      );
-    }
-    const proposals = s.actions.filter((x) => !x.chosen && x.suggested);
-    const busy = isRunning(job);
-    parts.push(
-      el('section', { class: 'cast-block' },
-        el('div', { class: 'block-head row' },
-          el('div', { class: 'grow' },
-            el('h3', { id: 'actions-title', text: actionsTitle() }),
-            el('p', { class: 'muted', text: 'Les cases où personne ne parle : un coup, des pas, une porte… GPT propose d’après les répliques autour (il ne voit pas l’image) ; survole l’image pour voir la scène.' })),
-          el('div', { class: 'actions' },
-            el('button', { type: 'button', class: 'pill', disabled: busy, title: s.gpt.configured ? '' : 'Colle d’abord la clé GPT', onclick: suggestSounds }, icon('sparkles'), 'Proposer avec GPT'),
-            proposals.length ? el('button', { type: 'button', class: 'pill accent', onclick: () => acceptActions(proposals) }, icon('check'), `Accepter les ${proposals.length} propositions`) : null)),
-        el('div', { class: 'lines' }, s.actions.map(soundRow))),
-    );
-  }
+  else parts.push(soundsSection());
   box.replaceChildren(...parts);
 }
 
-const spotsTitle = () => {
+function soundsSection() {
   const s = state.sounds;
-  return `Bruitages dessinés · ${s.spots.filter((x) => x.sound !== s.none).length} / ${s.spots.length} avec un son`;
-};
-const actionsTitle = () => {
-  const s = state.sounds;
-  return `Cases sans texte · ${s.actions.filter((x) => x.sound !== s.none).length} / ${s.actions.length} avec un son`;
-};
+  const all = soundItems();
+  const queue = all.filter((x) => state.soundKeys.has(x.key));
+  const rest = all.filter((x) => !state.soundKeys.has(x.key));
+  const withSound = queue.filter((x) => x.proposed !== s.none).length;
+  const busy = isRunning(findEpisode(state.current)?.job || s.job);
+  return el(
+    'section',
+    { class: 'cast-block', id: 'sound-block' },
+    el('div', { class: 'block-head row' },
+      el('div', { class: 'grow' },
+        el('h3', { text: `À sonoriser · ${queue.length}` }),
+        el('p', { class: 'muted', text: s.scene_done
+          ? 'Pour chaque bruitage dessiné et chaque case sans texte, je regarde l’image et je propose 3 sons (« je vois : du feu »). Clique sur un son : il se joue et il est choisi. La case se range en bas au bout de 3 secondes.'
+          : 'Je regarde d’abord ce que montrent les cases pour te proposer les bons sons…' })),
+      el('div', { class: 'actions' },
+        s.gpt.configured ? el('button', { type: 'button', class: 'pill', disabled: busy, title: 'GPT lit les répliques autour des cases sans texte et propose un son', onclick: suggestSounds }, icon('sparkles'), 'Demander aussi à GPT') : null,
+        queue.length ? el('button', { type: 'button', class: 'pill accent', title: `${withSound} avec un son, ${queue.length - withSound} sans`, onclick: () => acceptActions(queue) }, icon('check'), `Valider les ${queue.length} propositions`) : null)),
+    queue.length
+      ? el('div', { class: 'lines queue', id: 'sound-queue' }, queue.map(soundRow))
+      : el('div', { class: 'notice queue-empty' }, icon('check'), el('p', { text: 'Tout a son son (ou rien). Pour changer d’avis : « Déjà choisis », juste dessous.' })),
+    doneList('sound-done', `Déjà choisis · ${rest.filter((x) => x.sound !== s.none).length} avec un son, ${rest.filter((x) => x.sound === s.none).length} sans`, rest.map(soundRow)),
+  );
+}
 
 function soundRow(spot) {
   const s = state.sounds;
@@ -1995,23 +2261,33 @@ function soundRow(spot) {
   const h = Math.min(ch, Math.round((spot.box ? 0.6 : 1.4) * w));
   const cy = spot.box ? spot.box[1] + spot.box[3] / 2 : ch / 2;
   const view = [0, Math.max(0, Math.min(ch - h, Math.round(cy - h / 2))), w, h];
+  const picked = spot.chosen || !state.soundKeys.has(spot.key);
+  const cats = [...new Set([...spot.recs, ...(picked && spot.sound !== s.none ? [spot.sound] : [])])];
   const chip = (cat, label) =>
     el(
       'button',
-      { type: 'button', class: `chip-btn plain${spot.sound === cat ? ' on' : ''}${spot.suggested === cat && !spot.chosen ? ' proposed' : ''}`, onclick: () => chooseSound(spot, cat) },
+      { type: 'button', class: `chip-btn plain${picked && spot.sound === cat ? ' on' : ''}${!picked && spot.proposed === cat ? ' proposed' : ''}`, title: cat === s.none ? '' : 'Écouter et choisir', onclick: () => chooseSound(spot, cat) },
+      cat === s.none ? null : icon('play'),
       label,
     );
+  const others = Object.keys(s.categories).filter((c) => !cats.includes(c));
   const marks = spot.box ? [['bubble-box', spot.box]] : [];
   return el(
     'div',
-    { class: 'line-row', 'data-key': spot.key },
+    { class: 'line-row sound-row', 'data-key': spot.key },
     el('div', { class: 'shot', style: `aspect-ratio:${view[2]}/${view[3]}`, onmouseenter: (e) => showContext(e.currentTarget, spot.crop, marks.length ? marks : [['frame-box', [0, 0, w, ch]]]), onmouseleave: hidePeek },
       el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(spot.frame)}&y=${view[1]}&h=${view[3]}`, alt: '', loading: 'lazy' }),
       spot.box ? el('span', { class: 'bubble-box', style: boxStyle(spot.box, view) }) : null),
     el('div', { class: 'line-body' },
-      spot.text ? el('p', { class: 'quote', text: `« ${spot.text} »` }) : el('p', { class: 'quote', text: `Case ${spot.index + 1}` }),
+      el('p', { class: 'quote', text: spot.text ? `Bruitage dessiné « ${spot.text} »` : `Case ${spot.index + 1} · personne ne parle` }),
+      spot.seen.length ? el('p', { class: 'seen' }, icon('eye'), `Je vois : ${spot.seen.join(', ')}`) : s.scene_done ? el('p', { class: 'muted', text: 'Rien de bruyant sur l’image.' }) : null,
       spot.reason ? el('p', { class: 'muted', text: `GPT : ${spot.reason}` }) : null,
-      el('div', { class: 'who-chips' }, chip(s.none, 'Aucun'), Object.entries(s.categories).map(([cat, label]) => chip(cat, label)))),
+      el('div', { class: 'who-chips' },
+        cats.map((c) => chip(c, s.categories[c])),
+        chip(s.none, 'Aucun son'),
+        el('select', { class: 'chip-btn', 'aria-label': 'Un autre son', onchange: (e) => { const v = e.target.value; e.target.value = ''; if (v) chooseSound(spot, v); } },
+          el('option', { value: '', text: 'Autre son…' }),
+          others.map((c) => el('option', { value: c, text: s.categories[c] }))))),
   );
 }
 
@@ -2025,9 +2301,12 @@ async function chooseSound(spot, cat) {
     await sendSounds([{ key: spot.key, sound: cat }]);
     const fresh = [...state.sounds.spots, ...state.sounds.actions].find((x) => x.key === spot.key);
     if (fresh) document.querySelector(`#sounds .line-row[data-key="${CSS.escape(spot.key)}"]`)?.replaceWith(soundRow(fresh));
-    if ($('#spots-title')) $('#spots-title').textContent = spotsTitle();
-    if ($('#actions-title')) $('#actions-title').textContent = actionsTitle();
     renderHead();
+    if (state.soundKeys.has(spot.key))
+      settle(spot.key, 3, () => {
+        state.soundKeys.delete(spot.key);
+        afterSettle(spot.key, soundsSection());
+      });
   } catch (e) {
     toast(`Non enregistré : ${e.message}`);
   }
@@ -2035,12 +2314,14 @@ async function chooseSound(spot, cat) {
 
 async function acceptActions(items) {
   try {
-    await sendSounds(items.map((x) => ({ key: x.key, sound: x.suggested })));
+    await sendSounds(items.map((x) => ({ key: x.key, sound: x.proposed })));
+    for (const x of items) state.soundKeys.delete(x.key);
     renderSounds();
-    toast(plural(items.length, 'son ajouté', 'sons ajoutés'), {
+    toast(`${plural(items.length, 'case validée', 'cases validées')} (${items.filter((x) => x.proposed !== state.sounds.none).length} avec un son)`, {
       label: 'Annuler',
       run: async () => {
         await sendSounds(items.map((x) => ({ key: x.key, sound: null })));
+        for (const x of items) state.soundKeys.add(x.key);
         renderSounds();
       },
     });
@@ -2067,17 +2348,14 @@ async function suggestSounds() {
 async function onSoundsJob(before, after) {
   if (isRunning(after)) {
     const card = $('#job-card');
-    if (card && after.kind === 'sounds') card.replaceWith(jobCard(after));
+    if (card && ['sounds', 'scene'].includes(after.kind)) card.replaceWith(jobCard(after));
     else renderSounds();
     return;
   }
   if (isRunning(before)) {
     try {
       const s = await api(`/api/sounds?id=${enc(state.chapter.id)}`);
-      if (state.screen === 'sounds') {
-        state.sounds = s;
-        renderSounds();
-      }
+      if (state.screen === 'sounds') setSounds(s, true);
     } catch {}
   }
 }
@@ -2216,6 +2494,8 @@ function focusFrameRow() {
   setTimeout(() => {
     const row = [...document.querySelectorAll('.line-row[data-key]')].find((r) => r.dataset.key.startsWith(`${file}#`) || r.dataset.key === `frame:${file}`);
     if (row) {
+      const folded = row.closest('details');
+      if (folded && !folded.open) folded.open = true;
       row.scrollIntoView({ block: 'center' });
       row.classList.remove('flash');
       void row.offsetWidth;
@@ -2304,9 +2584,11 @@ function schedulePoll(delay) {
 async function poll() {
   try {
     const before = findEpisode(state.current)?.job;
+    const progressBefore = JSON.stringify(findEpisode(state.current)?.progress);
     state.library = await api('/api/library');
     renderLibrary();
     const after = findEpisode(state.current)?.job;
+    if (state.chapter && JSON.stringify(before) === JSON.stringify(after) && progressBefore !== JSON.stringify(findEpisode(state.current)?.progress)) renderHead();
     if (state.chapter && state.screen === 'video' && JSON.stringify(before) !== JSON.stringify(after)) {
       renderHead();
       if (isRunning(before) && !isRunning(after)) openVideo();

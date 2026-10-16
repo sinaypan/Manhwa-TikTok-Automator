@@ -54,6 +54,10 @@ Un chapitre = un dossier `inbox/<série>/<chapitre>/`. Deux façons :
 
 ### 2. Le Studio
 
+Le plus simple : double-clique sur `Studio.bat` (ou sur un raccourci vers ce fichier).
+Le Studio démarre et s'ouvre dans le navigateur ; fermer la fenêtre noire l'arrête.
+S'il tourne déjà, le double-clic rouvre juste la page. En ligne de commande :
+
 ```bash
 .venv\Scripts\python -m manhwa studio
 ```
@@ -180,16 +184,21 @@ et plus vite, « triste » plus bas et plus lentement…
 **Relire le chapitre** : GPT corrige les erreurs de lecture (« IDON'T THINK CAN » →
 « I DON'T THINK I CAN »), dit si une bulle est une réplique, une pensée, de la narration ou
 un bruitage, propose qui parle et note le ton de chaque réplique. Rien ne change sans ton
-accord (Accepter / Refuser, ou tout d'un coup), sauf le ton, modifiable sur chaque
-réplique de l'onglet Personnages. Environ 3 minutes pour un chapitre.
+accord, sauf le ton, modifiable sur chaque réplique de l'onglet Personnages. Environ
+3 minutes pour un chapitre. Les propositions arrivent une à une : **Accepter** (`A`),
+**Refuser** (`R`) ou **Corriger moi-même** (`E`, ta version est gardée même si GPT relit
+à nouveau) ; la suivante prend sa place. « Déjà décidées », en bas, pour changer d'avis.
 
 #### Onglet Sons
 
-Chaque bruitage repéré (SFX) peut recevoir un son : clic sur une catégorie (coup de poing,
-verre brisé, bois, lame, explosion, whoosh, pas, porte, magie…) pour l'écouter et la
-choisir, ou « Aucun ». Les sons viennent de packs libres (CC0) de [Kenney](https://kenney.nl),
-téléchargés au premier usage ; tes propres sons se rangent dans `sfx/<catégorie>/`.
-Le son part au début de sa case, sous la voix.
+Chaque bruitage dessiné (SFX) et chaque case sans texte peut recevoir un son. Le Studio
+regarde d'abord chaque case avec CLIP (un modèle d'image, en local, sans clé : ≈ 15 s par
+chapitre) et affiche ce qu'il y voit (« Je vois : du feu, une lame ») avec 3 sons proposés.
+Un clic sur un son le joue et le choisit ; la case se range en bas au bout de 3 s.
+**Valider les propositions** fait le reste d'un coup. Les sons viennent de packs libres
+(CC0) de [Kenney](https://kenney.nl), téléchargés au premier usage (feu, vent, whoosh et
+cœur sont fabriqués) ; tes propres sons se rangent dans `sfx/<catégorie>/`. Le son part au
+début de sa case, sous la voix.
 
 La **musique de fond** est le premier fichier du dossier `music/` (une nappe d'ambiance
 générée y est mise par défaut : remplace-la par le MP3 de ton choix). Elle baisse quand on
@@ -198,8 +207,8 @@ zooment très légèrement, et chaque case pousse la précédente vers le haut c
 webtoon qu'on fait défiler (`[render]` dans config.toml : `zoom`, `pan`, `transition`,
 `music_volume`…).
 
-Les **cases sans texte** (un coup, des pas, une porte…) peuvent aussi avoir un son :
-« Proposer avec GPT » le devine d'après les répliques autour, tu acceptes ou tu changes.
+Avec une clé GPT, « Demander aussi à GPT » ajoute sa proposition pour les cases sans texte,
+d'après les répliques autour.
 
 #### Clé GPT
 

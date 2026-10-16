@@ -10,7 +10,7 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from manhwa import cast, llm, review, sfx, voices
+from manhwa import cast, llm, review, scene, sfx, voices
 from manhwa.config import inbox_dir
 from manhwa.images import read_image
 from manhwa.ingest import wiki
@@ -534,7 +534,9 @@ def create_app(cfg):
         except Exception:
             ready = False
         music = music_file(cfg)
-        return {"spots": sfx.spots(data), "actions": sfx.silent_frames(data), "categories": sfx.labels(),
+        seen = scene.load_scene(chapter)
+        return {"spots": sfx.spots(data, seen), "actions": sfx.silent_frames(data, seen), "categories": sfx.labels(),
+                "scene_done": scene.scene_done(chapter, data),
                 "gpt": llm.public_settings(), "none": sfx.NONE, "library": ready,
                 "music": Path(music).name if music else None, "ocr_done": any("bubbles" in f for f in data["frames"]),
                 "job": jobs.get(id)}
@@ -554,6 +556,11 @@ def create_app(cfg):
                 raise HTTPException(422, str(e))
             chapter.save(data)
         return sounds_detail(id)
+
+    @app.post("/api/sounds/scene")
+    def sounds_scene(id: str = Query(...)):
+        """Regarde ce que montre chaque case (en local, sans clé), pour proposer les sons."""
+        return jobs.submit(id, chapter_of(id), kind="scene")
 
     @app.post("/api/sounds/suggest")
     def sounds_suggest(id: str = Query(...)):
@@ -687,13 +694,27 @@ def create_app(cfg):
     return app
 
 
+def _already_running(host, port):
+    import socket
+
+    with socket.socket() as s:
+        s.settimeout(0.5)
+        return s.connect_ex((host, port)) == 0
+
+
 def serve(cfg, host="127.0.0.1", port=8765, open_browser=True):
     import webbrowser
 
     import uvicorn
 
     url = f"http://{host}:{port}/"
-    print(f"Studio : {url}  (Ctrl+C pour arrêter)")
+    if _already_running(host, port):
+        # double-clic alors que le Studio tourne déjà : on rouvre juste la page
+        print(f"Le Studio tourne déjà : {url}")
+        if open_browser:
+            webbrowser.open(url)
+        return
+    print(f"Studio : {url}  (fermer cette fenêtre arrête le Studio)")
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     uvicorn.run(create_app(cfg), host=host, port=port, log_level="warning")

@@ -14,11 +14,12 @@ import traceback
 STEP_LABELS = {"frames": "Frames", "ocr": "Lecture du texte", "tts": "Voix", "render": "Rendu vidéo",
                "faces": "Recherche des visages", "wiki": "Lecture du wiki", "wiki_images": "Images du wiki",
                "wiki_faces": "Visages du wiki", "review": "Relecture GPT", "voices": "Choix des voix",
-               "sounds": "Sons des cases sans texte", "download": "Téléchargement"}
+               "sounds": "Sons des cases sans texte", "scene": "Ce que montrent les cases",
+               "download": "Téléchargement"}
 # ce que l'on compte à chaque étape (« 6 210 / 12 960 images »)
 STEP_UNITS = {"frames": "frames", "ocr": "frames lues", "tts": "voix", "render": "images", "faces": "frames", "wiki": "",
               "wiki_images": "images", "wiki_faces": "images", "review": "lots", "voices": "", "sounds": "",
-              "download": ""}
+              "scene": "cases", "download": ""}
 IMPORT_ID = "import"  # l'import n'a pas encore de chapitre : il a sa propre ligne
 
 
@@ -64,6 +65,7 @@ class Jobs:
         from manhwa.panels import build_frames
         from manhwa.render import run_render
         from manhwa.review import run_review
+        from manhwa.scene import run_scene
         from manhwa.sfx import suggest_actions
         from manhwa.tts import run_tts
         from manhwa.voices import propose as propose_voices
@@ -77,6 +79,7 @@ class Jobs:
             "review": lambda c, p: run_review(c, cfg, progress=p),
             "voices": lambda c, p: propose_voices(c, cfg, progress=p),
             "sounds": lambda c, p: suggest_actions(c, cfg, progress=p),
+            "scene": lambda c, p: run_scene(c, cfg, progress=p),
             "tts": lambda c, p: run_tts(c, cfg, progress=p),
             "render": lambda c, p: run_render(c, cfg, progress=p),
             "wiki_images": lambda c, p: wiki.fetch_images(series_dir(c), progress=p),
@@ -84,7 +87,7 @@ class Jobs:
         }
         plans = {
             "make": ["frames", "ocr", "tts", "render"],
-            "auto": ["frames", "ocr", "faces", "wiki?", "review?", "voices?", "sounds?", "tts", "render"],
+            "auto": ["frames", "ocr", "faces", "scene?", "wiki?", "review?", "voices?", "sounds?", "tts", "render"],
             "wiki_images": ["wiki_images", "wiki_faces"],
         }
         if kind == "import":

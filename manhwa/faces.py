@@ -54,13 +54,13 @@ def _sha256(path):
     return h.hexdigest()
 
 
-def ensure_models():
+def ensure_models(models=None):
     """Télécharge les modèles manquants ; refuse un fichier dont l'empreinte ne correspond pas."""
     import requests
 
     folder = models_dir()
     folder.mkdir(parents=True, exist_ok=True)
-    for name, (url, sha) in MODELS.items():
+    for name, (url, sha) in (models or MODELS).items():
         path = folder / name
         if path.is_file() and _sha256(path) == sha:
             continue

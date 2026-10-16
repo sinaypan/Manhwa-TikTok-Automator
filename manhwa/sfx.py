@@ -2,7 +2,7 @@
 
 Les sons viennent de trois packs de Kenney (kenney.nl, licence CC0 : libres, sans crédit
 obligatoire), téléchargés au premier usage dans .cache/ et vérifiés par SHA-256. Ce qui
-manque (whoosh, battement de cœur) est fabriqué ici. On peut ajouter ses propres sons :
+manque (whoosh, battement de cœur, feu, vent) est fabriqué ici. On peut ajouter ses propres sons :
 un fichier .ogg / .wav / .mp3 dans sfx/<catégorie>/ (à la racine du projet) s'ajoute au choix.
 
 Le son d'un SFX : frame["sounds"] = {texte de la bulle: catégorie | "none"}, choisi dans
@@ -45,7 +45,10 @@ CATEGORIES = {
     "cloth": ("Tissu", ["cloth"]),
     "heartbeat": ("Cœur", []),
     "thunder": ("Tonnerre", ["lowFrequency_explosion"]),
+    "fire": ("Feu", []),
+    "wind": ("Vent", []),
 }
+LIBRARY_VERSION = "2"  # à changer quand la bibliothèque change : elle est refaite
 NONE = "none"
 SURE_FROM_GPT = set(CATEGORIES) - {"impact"}  # « impact » : GPT le dit pour tout, on laisse choisir
 VOLUME = 0.55  # sous la voix
@@ -68,7 +71,8 @@ def ensure_library():
     import requests
 
     folder = library_dir()
-    if (folder / ".ready").is_file():
+    ready = folder / ".ready"
+    if ready.is_file() and ready.read_text(encoding="utf-8").strip() == LIBRARY_VERSION:
         return folder
     folder.mkdir(parents=True, exist_ok=True)
     wanted = {prefix: cat for cat, (_, prefixes) in CATEGORIES.items() for prefix in prefixes}
@@ -95,7 +99,7 @@ def ensure_library():
                         out.parent.mkdir(exist_ok=True)
                         out.write_bytes(z.read(info))
     _synthesize(folder)
-    (folder / ".ready").write_text("ok", encoding="utf-8")
+    ready.write_text(LIBRARY_VERSION, encoding="utf-8")
     return folder
 
 
@@ -111,9 +115,48 @@ def _write_wav(path, samples, rate=44100):
         w.writeframes(pcm.tobytes())
 
 
+def _lowpass(x, cutoff):
+    """Filtre passe-bas d'ordre 1 ; cutoff : un nombre ou une courbe (0 → 1) le long du son."""
+    out, low = np.empty_like(x), 0.0
+    cut = np.broadcast_to(cutoff, x.shape)
+    for i in range(len(x)):
+        low += cut[i] * (x[i] - low)
+        out[i] = low
+    return out
+
+
+def _fire(folder, rng, rate):
+    """Un feu qui crépite : grondement sourd + petits craquements au hasard."""
+    for k, length in enumerate((2.0, 3.0)):
+        n = int(rate * length)
+        t = np.linspace(0, 1, n)
+        rumble = _lowpass(rng.standard_normal(n), 0.01)
+        rumble /= np.abs(rumble).max() + 1e-9
+        crackle = np.zeros(n)
+        for start in rng.integers(0, n - 2000, int(28 * length)):
+            m = int(rng.integers(150, 900))
+            crackle[start:start + m] += rng.uniform(0.3, 1.0) * rng.standard_normal(m) * np.exp(-np.arange(m) / (m / 5))
+        crackle = crackle - _lowpass(crackle, 0.15)  # les craquements restent secs et aigus
+        out = (0.55 * rumble + 0.5 * crackle) * np.minimum(1, np.minimum(t, 1 - t) * 6)
+        _write_wav(folder / "fire" / f"fire_{k}.wav", 0.9 * out / (np.abs(out).max() + 1e-9), rate)
+
+
+def _wind(folder, rng, rate):
+    """Une rafale de vent : souffle filtré dont le filtre et le volume ondulent lentement."""
+    for k, length in enumerate((2.0, 3.0)):
+        n = int(rate * length)
+        t = np.linspace(0, 1, n)
+        swell = 0.5 + 0.5 * np.sin(np.pi * t) ** 2 * (0.8 + 0.2 * np.sin(2 * np.pi * (2 + k) * t))
+        out = _lowpass(rng.standard_normal(n), 0.004 + 0.03 * swell)
+        out *= swell * np.minimum(1, np.minimum(t, 1 - t) * 5)
+        _write_wav(folder / "wind" / f"wind_{k}.wav", 0.8 * out / (np.abs(out).max() + 1e-9), rate)
+
+
 def _synthesize(folder, rate=44100):
-    """Les sons absents des packs : whoosh (souffle filtré qui monte et descend) et cœur."""
+    """Les sons absents des packs : whoosh (souffle filtré qui monte et descend), cœur, feu et vent."""
     rng = np.random.default_rng(7)
+    _fire(folder, rng, rate)
+    _wind(folder, rng, rate)
     for k, length in enumerate((0.45, 0.6, 0.8)):
         n = int(rate * length)
         t = np.linspace(0, 1, n)
@@ -162,8 +205,20 @@ def labels():
 
 # ---------- Le son de chaque SFX du chapitre ----------
 
-def spots(data):
-    """Les SFX du chapitre : [{"key", "frame", "text", "box", "crop", "sound", "suggested", "chosen"}]."""
+def _with_scene(item, scene, gpt):
+    """Ajoute « je vois » (seen), les sons proposés (recs) et celui à mettre d'office (proposed)."""
+    from manhwa.scene import recommend
+
+    s = (scene or {}).get(item["frame"])
+    recs, best = recommend(s, gpt)
+    item["recs"] = recs
+    item["proposed"] = best or NONE
+    item["seen"] = list(((s or {}).get("seen") or {}).keys())[:3]
+    return item
+
+
+def spots(data, scene=None):
+    """Les SFX du chapitre : [{"key", "frame", "text", "box", "crop", "sound", "suggested", "chosen", "recs"…}]."""
     from manhwa.review import effective
 
     out = []
@@ -174,11 +229,11 @@ def spots(data):
                 continue
             gpt = b.get("sfx")
             suggested = gpt if gpt in SURE_FROM_GPT else None
-            out.append({
+            out.append(_with_scene({
                 "key": f"{frame['file']}#{b['index']}", "frame": frame["file"], "text": b["orig"], "box": b["box"],
                 "crop": frame["crop"], "chosen": b["orig"] in chosen,
                 "sound": chosen.get(b["orig"], suggested or NONE), "suggested": suggested, "gpt": gpt,
-            })
+            }, scene, gpt if gpt in CATEGORIES else None))
     return out
 
 
@@ -229,7 +284,7 @@ def frame_sounds(data):
 ACTION_PREFIX = "frame:"  # clé d'une case entière (et pas d'une bulle) dans set_sounds
 
 
-def silent_frames(data):
+def silent_frames(data, scene=None):
     """Les cases où personne ne parle : on peut y mettre un son (coup, pas, porte…)."""
     from manhwa.review import effective, is_spoken
 
@@ -238,9 +293,10 @@ def silent_frames(data):
         if any(is_spoken(b) for b in effective(frame)):
             continue
         action = frame.get("action_sound") or {}
-        out.append({"key": ACTION_PREFIX + frame["file"], "frame": frame["file"], "index": i, "crop": frame["crop"],
-                    "sound": action.get("chosen") or NONE, "chosen": bool(action.get("chosen")),
-                    "suggested": action.get("suggested"), "reason": action.get("reason")})
+        out.append(_with_scene({"key": ACTION_PREFIX + frame["file"], "frame": frame["file"], "index": i,
+                                "crop": frame["crop"], "sound": action.get("chosen") or NONE,
+                                "chosen": bool(action.get("chosen")), "suggested": action.get("suggested"),
+                                "reason": action.get("reason")}, scene, action.get("suggested")))
     return out
 
 

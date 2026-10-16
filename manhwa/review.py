@@ -19,7 +19,7 @@ SPOKEN = ("dialogue", "thought", "narration")      # lus par une voix
 KINDS = SPOKEN + ("sfx", "noise")
 SENT_KINDS = ("dialogue", "sfx", "noise")          # bulles envoyées à GPT (pas les filigranes, crédits…)
 SFX_CATEGORIES = ("impact", "punch", "slash", "glass", "wood", "explosion", "whoosh", "footsteps", "door",
-                  "magic", "scream", "groan", "laugh", "heartbeat", "thunder", "rain", "other")
+                  "magic", "scream", "groan", "laugh", "heartbeat", "thunder", "rain", "fire", "wind", "other")
 FIELDS = ("text", "kind", "speaker")
 CHUNK = 45     # répliques par appel
 CONTEXT = 8    # répliques d'avant redonnées pour le contexte
@@ -175,6 +175,11 @@ def run_review(chapter, cfg, progress=None, force=False):
             state[field] = (old.get("state") or {}).get(field, "pending") if same and not force else "pending"
         if old.get("emotion_by") == "user":
             proposal["emotion"], proposal["emotion_by"] = old["emotion"], "user"
+        if old.get("mine"):  # ta propre version (texte, type) reste, acceptée
+            for field in ("text", "kind"):
+                if (old.get("state") or {}).get(field) == "accepted" and not force:
+                    proposal[field], state[field] = old[field], "accepted"
+            proposal["mine"] = True
         reviews[orig] = {**proposal, "state": state}
         changed += 1
     chapter.save(data)
@@ -211,7 +216,10 @@ def proposals(data, crew):
 
 
 def decide(data, decisions):
-    """decisions : [{"key", "field", "state": "accepted" | "rejected" | "pending"}]."""
+    """decisions : [{"key", "field", "state": "accepted" | "rejected" | "pending", "value"?}].
+
+    value (avec "accepted") : ta propre version au lieu de celle de GPT (un texte, ou un type de bulle).
+    """
     frames = {f["file"]: f for f in data["frames"]}
     n = 0
     for d in decisions:
@@ -224,6 +232,16 @@ def decide(data, decisions):
         field, state = d.get("field"), d.get("state")
         if not r or field not in (r.get("state") or {}) or state not in ("accepted", "rejected", "pending"):
             continue
+        value = d.get("value")
+        if state == "accepted" and value is not None:
+            if field == "text" and isinstance(value, str) and value.strip() and len(value) <= 500:
+                r["text"] = " ".join(value.split())
+                r["mine"] = True  # ta version : une nouvelle relecture ne l'écrase pas
+            elif field == "kind" and value in KINDS:
+                r["kind"] = value
+                r["mine"] = True
+            else:
+                continue
         r["state"][field] = state
         if field == "speaker":
             speakers = frame.setdefault("speakers", {})

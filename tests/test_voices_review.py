@@ -131,6 +131,31 @@ def test_review_proposes_and_waits_for_approval(chapter, monkeypatch):
         review.set_emotion(data, "frame_0001.jpg#0", "joie")
 
 
+def test_review_keeps_my_own_version(chapter, monkeypatch):
+    ch, hero = chapter
+    cfg = load_config()
+    llm.save_settings(base="https://x/v1", key="sk-test-123456")
+    monkeypatch.setattr(review, "ask", lambda items, *a: {
+        "frame_0001.jpg#0": {"text": "I DON'T THINK CAN GO!", "kind": "dialogue", "speaker": "unknown", "emotion": "sad"},
+        "frame_0002.jpg#0": {"text": "Long ago, in the east...", "kind": "narration", "speaker": "unknown", "emotion": "calm"},
+    })
+    review.run_review(ch, cfg)
+    data = ch.load()
+    crew = cast.load_cast(ch)
+    # ma version au lieu de celle de GPT ; une valeur invalide ne change rien
+    assert review.decide(data, [{"key": "frame_0001.jpg#0", "field": "text", "state": "accepted", "value": "  I DON'T THINK  I CAN GO. "},
+                                {"key": "frame_0002.jpg#0", "field": "kind", "state": "accepted", "value": "joie"}]) == 1
+    assert review.decide(data, [{"key": "frame_0002.jpg#0", "field": "kind", "state": "accepted", "value": "thought"}]) == 1
+    lines = cast.lines(data, crew)
+    assert lines[0]["text"] == "I DON'T THINK I CAN GO." and lines[1]["kind"] == "thought"
+    ch.save(data)
+    review.run_review(ch, cfg)  # GPT repasse : ma version reste, acceptée
+    items = {(p["key"], p["field"]): p for p in review.proposals(ch.load(), crew)}
+    assert items[("frame_0001.jpg#0", "text")]["new"] == "I DON'T THINK I CAN GO."
+    assert items[("frame_0001.jpg#0", "text")]["state"] == "accepted"
+    assert items[("frame_0002.jpg#0", "kind")]["new"] == "thought"
+
+
 def test_studio_settings_and_voice_choice(chapter):
     ch, hero = chapter
     cfg = load_config()

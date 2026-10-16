@@ -1965,3 +1965,282 @@ select.emotion.set {
   background: color-mix(in srgb, var(--warn) 18%, var(--bg));
   color: var(--warn);
 }
+
+/* ---------- Vidéo pas à jour : le bouton respire doucement ---------- */
+
+.pill.accent.pulse {
+  animation: breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill.accent.pulse {
+    animation: none;
+  }
+}
+
+/* ---------- File « à faire » : compte à rebours, puis la ligne se range en bas ---------- */
+
+.queue > .line-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.line-row.settling {
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+
+.line-row.settling::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--ok);
+  animation: settle var(--settle, 4s) linear forwards;
+}
+
+@keyframes settle {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0;
+  }
+}
+
+.line-row.leaving {
+  height: 0 !important;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-bottom: -10px; /* l'écart de la liste disparaît avec elle */
+  opacity: 0;
+  transition: height 0.28s ease, padding 0.28s ease, margin 0.28s ease, opacity 0.2s ease;
+}
+
+.done-list {
+  margin-top: 4px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--field) 50%, transparent);
+}
+
+.done-list > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.done-list > summary::-webkit-details-marker {
+  display: none;
+}
+
+.done-list > summary svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 2.5;
+}
+
+.done-list > summary .muted {
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.done-list > .lines {
+  padding: 0 10px 10px;
+}
+
+/* ---------- Personnages : cartes repliées ---------- */
+
+.more-faces {
+  min-width: 52px;
+  height: 52px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+details.silent-block > summary {
+  padding: 8px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+details.silent-block > summary .muted {
+  font-size: 12px;
+}
+
+/* ---------- Relecture : une proposition à la fois ---------- */
+
+.review-focus {
+  display: grid;
+  gap: 14px;
+  max-width: 920px;
+}
+
+.focus-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.focus-head .grow {
+  flex: 1;
+}
+
+.focus-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.focus-body .shot {
+  max-height: 520px;
+}
+
+.focus-body .diff p,
+.focus-body .quote {
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+.focus-body .small {
+  font-size: 12px;
+}
+
+.old-plain {
+  color: var(--muted);
+}
+
+.edit-text {
+  width: 100%;
+  font: inherit;
+  font-size: 16px;
+  resize: vertical;
+}
+
+.focus-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pill.big {
+  padding: 12px 20px;
+  font-size: 15px;
+}
+
+.pill kbd {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  font: inherit;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.state-badge svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+}
+
+.state-badge.accepted {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  color: var(--ok);
+}
+
+.state-badge.rejected {
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  color: var(--muted);
+}
+
+.line-row.review.rejected {
+  opacity: 0.8;
+}
+
+/* ---------- Sons : ce que montre l'image ---------- */
+
+.seen {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.seen svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.sound-row .chip-btn > svg {
+  width: 9px;
+  height: 9px;
+  margin-left: 0;
+  fill: currentColor;
+  opacity: 0.7;
+}
+
+@media (max-width: 760px) {
+  .focus-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .line-row.settling::after {
+    animation: none;
+  }
+  .line-row.leaving {
+    transition: none;
+  }
+}
+
+/* Personnages : les voix (narrateur, figurants) à part, les cartes tassées sans trous */
+.cast-grid.voices {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  margin-bottom: 12px;
+}
+
+.cast-grid.packed {
+  display: block;
+  columns: 280px;
+  column-gap: 12px;
+}
+
+.cast-grid.packed > .card {
+  break-inside: avoid;
+  margin-bottom: 12px;
+}

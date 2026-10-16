@@ -35,4 +35,5 @@ def chapter_progress(chapter, cfg):
         "pages": pages,
         "frames": len(frames),
         "texts": len(texts),
+        "video": chapter.video_path.is_file(),
     }
