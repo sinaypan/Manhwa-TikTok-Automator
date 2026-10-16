@@ -441,8 +441,12 @@ def lines(data, cast):
             for cid, n in counts.items():
                 scores[cid] = max(scores[cid], 0.1 * n / total)
             ranked = sorted(scores, key=lambda c: -scores[c])
+            # confiance : l'avance du premier sur le deuxième (0 = au coude à coude)
+            top = [scores[c] for c in ranked[:2]] + [0.0, 0.0]
+            confidence = top[0] - top[1]
             if bubble["kind"] == "narration":
                 ranked.insert(0, NARRATOR)  # un encadré de narration : le narrateur d'abord
+                confidence = 0.9
             speaker = speakers.get(bubble["orig"])
             if speaker not in ids and speaker not in SPECIAL:
                 speaker = None
@@ -455,6 +459,7 @@ def lines(data, cast):
                 "box": bubble["box"],
                 "speaker": speaker,
                 "suggestion": ranked[0] if ranked else None,
+                "confidence": round(confidence, 3) if ranked else 0.0,
                 "candidates": ranked[:4],
                 "view": _view(frame, bubble, here),
                 "crop": frame["crop"],

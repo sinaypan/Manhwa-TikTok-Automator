@@ -7,6 +7,7 @@
     slice <chemin>   découpe manuelle (ancienne fenêtre)
     ocr <chemin>     lit le texte des frames (--engine paddle | windows | tesseract)
     ocr-bench <ch.>  compare les moteurs OCR à la référence .studio/ocr_gold.json
+    bench <ch.>      mesure ce que la machine décide seule, comparé à tes choix (--freeze)
     tts <chemin>     génère les voix
     render <chemin>  assemble la vidéo
     make [chemin]    tout d'un coup (découpe auto si besoin → OCR → voix → vidéo)
@@ -121,6 +122,43 @@ def cmd_ocr_bench(args, cfg):
     return 0
 
 
+def _fmt(value):
+    if isinstance(value, float):
+        return f"{value:.0%}"
+    if isinstance(value, dict):
+        return " · ".join(f"{k} {_fmt(v)}" for k, v in value.items()) or "-"
+    return "-" if value is None else str(value)
+
+
+def cmd_bench(args, cfg):
+    from manhwa.bench import STEP_LABELS, freeze, previous_runs, run_bench
+
+    chapters = resolve_chapters(args.path, cfg)
+    if len(chapters) != 1:
+        print("Indique un seul chapitre.")
+        return 1
+    chapter = chapters[0]
+    if args.freeze:
+        kept = freeze(chapter)
+        print("Référence figée (.studio/gold.json, jamais commitée) : " + ", ".join(f"{v} {k}" for k, v in kept.items()))
+    before = (previous_runs(chapter) or [{}])[-1].get("report", {})
+    try:
+        report = run_bench(chapter, args.steps)
+    except RuntimeError as e:
+        print(e)
+        return 1
+    for step, metrics in report.items():
+        print(f"\n{STEP_LABELS[step]}")
+        for name, value in metrics.items():
+            old = before.get(step, {}).get(name)
+            delta = ""
+            if isinstance(value, (int, float)) and isinstance(old, (int, float)) and old != value:
+                delta = f"   (avant : {_fmt(old)})"
+            print(f"  {name:28s} {_fmt(value)}{delta}")
+    print("\nDétail des erreurs : .studio/bench_details.json · historique : .studio/bench_history.json")
+    return 0
+
+
 def cmd_tts(args, cfg):
     from manhwa.tts import run_tts
 
@@ -181,6 +219,12 @@ def build_parser():
     p.add_argument("path", help="le chapitre (avec .studio/ocr_gold.json)")
     p.add_argument("--engines", nargs="+", choices=["paddle", "windows", "tesseract"])
     p.set_defaults(func=cmd_ocr_bench)
+
+    p = sub.add_parser("bench", help="mesurer ce que la machine décide seule, comparé à tes choix")
+    p.add_argument("path", help="le chapitre")
+    p.add_argument("--freeze", action="store_true", help="figer d'abord tes décisions actuelles comme référence")
+    p.add_argument("--steps", nargs="+", choices=["kinds", "text", "speakers", "faces", "emotion", "sounds"])
+    p.set_defaults(func=cmd_bench)
 
     p = sub.add_parser("status", help="état des chapitres")
     p.add_argument("path", nargs="?", help="chapitre, série ou inbox (par défaut)")

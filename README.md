@@ -154,6 +154,13 @@ pour les bruitages. Le moteur se change dans `config.toml` (`[ocr] engine` : `pa
 Pour comparer les moteurs sur un chapitre, mets une référence lue à la main dans
 `<chapitre>/.studio/ocr_gold.json` puis lance `python -m manhwa ocr-bench <chapitre>`.
 
+Pour mesurer tout ce que la machine décide seule (types de bulle, texte, qui parle,
+visages, ton, sons) par rapport à tes choix, utilise `python -m manhwa bench <chapitre>`.
+`--freeze` fige d'abord tes décisions actuelles comme référence, dans
+`.studio/gold.json`, qui n'est jamais commité. Chaque passage est gardé dans
+`.studio/bench_history.json`, et l'écart avec le passage précédent s'affiche
+(voir PLAN_V3.md).
+
 ### Contrôles de la découpe à la main (`slice`)
 
 | Touche | Action |
