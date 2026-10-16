@@ -8,7 +8,7 @@ alerte sur 15 (une interjection, ignorée depuis).
 Whisper travaille par fenêtres de 30 s : les répliques sont mises bout à bout (paquets de
 ≈ 25 s, un blanc entre deux) et chaque mot entendu revient à sa réplique par son instant.
 Modèle « small » (MIT, ≈ 480 Mo), téléchargé au premier usage dans .cache/models/ et
-vérifié par son empreinte. Sur le processeur (int8).
+vérifié par son empreinte. Sur la carte graphique (≈ 3× plus rapide), sinon le processeur.
 Résultat dans chaque segment : heard (ce que Whisper a entendu), wer (part des mots
 différents), heard_key (la voix réécoutée ; recalculé seulement si l'audio change).
 """
@@ -19,7 +19,7 @@ import numpy as np
 
 from manhwa.ocr_bench import words
 
-LISTEN_VERSION = 1
+LISTEN_VERSION = 2  # 2 : les instants des mots (sous-titres)
 _REV = "536b0662742c02347bc0e980a01041f333bce120"
 _BASE = f"https://huggingface.co/Systran/faster-whisper-small/resolve/{_REV}"
 MODELS = {
@@ -44,8 +44,21 @@ def _model():
 
         from manhwa.faces import ensure_models, models_dir
 
+        from manhwa.gpu import enable_cuda_dlls
+
         ensure_models(MODELS)
-        _MODEL["m"] = WhisperModel(str(models_dir() / "whisper-small"), device="cpu", compute_type="int8")
+        folder = str(models_dir() / "whisper-small")
+        _MODEL["m"] = None
+        if enable_cuda_dlls():  # sans les DLL CUDA, CTranslate2 reste bloqué : on ne tente même pas
+            try:
+                import ctranslate2
+
+                if ctranslate2.get_cuda_device_count():
+                    _MODEL["m"] = WhisperModel(folder, device="cuda", compute_type="float16")
+            except Exception as e:
+                print(f"  [!] Whisper sur la carte graphique impossible ({e}) : processeur")
+        if _MODEL["m"] is None:
+            _MODEL["m"] = WhisperModel(folder, device="cpu", compute_type="int8")
     return _MODEL["m"]
 
 
@@ -87,10 +100,14 @@ def flagged(segment, names=None):
     return len(said) >= 2 or not frequency(said[0])
 
 
-def transcribe(clips):
-    """clips : [tableau audio] → [texte entendu], en passant les répliques par paquets."""
+def transcribe(clips, timed=False):
+    """clips : [tableau audio] → [texte entendu], en passant les répliques par paquets.
+
+    timed : renvoie aussi les mots avec leur instant dans la réplique ([[mot, début, fin]]).
+    """
     model = _model()
     out = [[] for _ in clips]
+    times = [[] for _ in clips]
     gap = np.zeros(int(GAP * RATE), np.float32)
     i = 0
     while i < len(clips):
@@ -106,10 +123,13 @@ def transcribe(clips):
         for s in segments:
             for w in s.words or []:
                 mid = (w.start + w.end) / 2
-                owner = next((k for k, a, b in spans if a - GAP / 2 <= mid < b + GAP / 2), None)
+                owner = next(((k, a) for k, a, b in spans if a - GAP / 2 <= mid < b + GAP / 2), None)
                 if owner is not None:
-                    out[owner].append(w.word)
-    return ["".join(ws).strip() for ws in out]
+                    out[owner[0]].append(w.word)
+                    times[owner[0]].append([w.word.strip(), round(max(0.0, w.start - owner[1]), 3),
+                                            round(max(0.0, w.end - owner[1]), 3)])
+    texts = ["".join(ws).strip() for ws in out]
+    return (texts, times) if timed else texts
 
 
 SHORT = 0.6        # s : une case qui passe plus vite ne se voit pas
@@ -149,9 +169,9 @@ def run_listen(chapter, cfg=None, progress=None):
     batch = 40
     for start in range(0, len(todo), batch):
         part = todo[start:start + batch]
-        heard = transcribe([pcm(chapter.root / s["audio"]) for _, _, s in part])
-        for (file, k, s), h in zip(part, heard):
-            results[(file, k)] = (h, difference(s["text"], h), f"{LISTEN_VERSION}:{s.get('audio_key')}")
+        heard, times = transcribe([pcm(chapter.root / s["audio"]) for _, _, s in part], timed=True)
+        for (file, k, s), h, ws in zip(part, heard, times):
+            results[(file, k)] = (h, difference(s["text"], h), f"{LISTEN_VERSION}:{s.get('audio_key')}", ws)
         if progress:
             progress(min(start + batch, len(todo)), len(todo))
     data = chapter.load()  # relu : on a pu changer des choses pendant l'écoute
@@ -159,7 +179,7 @@ def run_listen(chapter, cfg=None, progress=None):
         for k, s in enumerate(f.get("segments") or []):
             got = results.get((f["file"], k))
             if got and s.get("audio_key") == got[2].split(":", 1)[1]:
-                s["heard"], s["wer"], s["heard_key"] = got
+                s["heard"], s["wer"], s["heard_key"], s["words"] = got  # words : les instants, pour les sous-titres
     chapter.save(data)
     n = len([c for c in checks(chapter, data) if c["kind"] == "heard"])
     print(f"  Réécoute : {len(results)} répliques, {n} où la voix ne dit pas ce qui est écrit.")

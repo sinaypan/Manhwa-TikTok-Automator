@@ -1,6 +1,14 @@
-# OCR sur carte graphique NVIDIA (≈ 26× plus rapide que sur processeur, mesuré sur une RTX 3050).
-# Remplace paddlepaddle (processeur) par paddlepaddle-gpu, version CUDA 12.6 :
-#   uv pip uninstall paddlepaddle
-#   uv pip install -r requirements-gpu.txt --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --index-strategy unsafe-best-match
-# Sans carte NVIDIA, garde requirements.txt : l'OCR tourne sur le processeur.
+# Carte graphique NVIDIA : OCR, détecteurs, Whisper et Kokoro bien plus rapides
+# (mesuré sur une RTX 3050 6 Go). Sans carte NVIDIA, garde requirements.txt : tout tourne
+# sur le processeur, en plus lent.
+#
+# 1. OCR (≈ 26× plus rapide) : paddlepaddle-gpu remplace paddlepaddle. Il installe aussi
+#    les bibliothèques CUDA 12 (nvidia-*) dont se servent les autres modèles :
+#      uv pip uninstall paddlepaddle
+#      uv pip install -r requirements-gpu.txt --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --index-strategy unsafe-best-match
 paddlepaddle-gpu==3.3.1
+# 2. Détecteurs ONNX (bulles, visages, CLIP, Kokoro) : la version GPU d'onnxruntime, faite
+#    pour CUDA 12 (les versions ≥ 1.24 veulent CUDA 13) ; elle remplace onnxruntime :
+#      uv pip uninstall onnxruntime
+onnxruntime-gpu==1.23.2
+# 3. Voix expressives (Chatterbox) : dans un environnement à part, voir manhwa/chatterbox_tts.py.

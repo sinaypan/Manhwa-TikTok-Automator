@@ -3,10 +3,13 @@
 Deux détecteurs qui se complètent :
     - YuNet (OpenCV) trouve les visages dessinés de façon réaliste (hommes, vieillards) ;
     - le détecteur « animeface » trouve les visages style anime (grands yeux).
-Chaque tête (visage + cheveux) est ensuite décrite par DINOv2-small : deux têtes du même
-personnage ont des descriptions proches, ce qui permet de les regrouper sans connaître
-les noms. Mesuré sur Myst Might Mayhem ch. 1 : 71 visages, un groupe par personnage
-principal, quelques erreurs à corriger d'un clic dans le Studio.
+Chaque tête (visage + cheveux) est ensuite décrite deux fois :
+    - CCIP (deepghs, entraîné à reconnaître un même personnage d'anime) pour regrouper les
+      têtes d'un chapitre et reconnaître les personnages déjà nommés : mesuré sur le ch. 1,
+      14 visages à déplacer au lieu de 23 avec DINOv2 ;
+    - DINOv2-small pour les comparer aux images du wiki (bon personnage ≈ 0,89, autre
+      ≤ 0,76 ; CCIP sépare moins bien des dessins de styles différents) et aux formes déjà
+      écartées.
 
 Les modèles (≈ 90 Mo) sont téléchargés au premier usage dans .cache/models/ et vérifiés
 par leur empreinte SHA-256. Tout tourne en local, sur le processeur.
@@ -22,6 +25,8 @@ from manhwa.project import fingerprint
 FACES_VERSION = 1  # à incrémenter quand le repérage change : les visages sont recherchés à nouveau
 MATCH = 0.66       # similarité (cosinus DINOv2) à partir de laquelle deux têtes sont le même personnage
                    # (0.6 mélangeait des brigands au héros sur le ch. 1 ; 0.7 coupait le héros en trois)
+CCIP_GROUP = 0.6   # CCIP : deux têtes du chapitre dans le même groupe (banc du ch. 1 : 14 à déplacer)
+CCIP_MATCH = 0.66  # CCIP : une tête reconnue comme un personnage déjà nommé (47 justes sur 57, 8 erreurs)
 NOT_FACE_MATCH = 0.8  # très proche d'une forme déjà écartée (fenêtre, poing…) : écartée aussi
 MIN_FACE = 40      # px : en dessous, trop petit pour être reconnu
 THUMB = 128
@@ -38,6 +43,11 @@ MODELS = {
     "dinov2s.onnx": (
         "https://huggingface.co/onnx-community/dinov2-small/resolve/main/onnx/model.onnx",
         "f22797eabf810a75e41de68d378541ebea372122b25c4ce3ef25ff618250c20a",
+    ),
+    "ccip_feat.onnx": (  # deepghs/ccip_onnx, ccip-caformer-24-randaug-pruned (OpenRAIL)
+        "https://huggingface.co/deepghs/ccip_onnx/resolve/eb2acdd29af1703388d3d0c04221add322bc9110/"
+        "ccip-caformer-24-randaug-pruned/model_feat.onnx",
+        "4ea118d16496274f4f6e08d3afc768cc592389e8f7f32f8732ce2215c228ac5f",
     ),
 }
 
@@ -91,6 +101,9 @@ def _models():
         _MODELS["cascade"] = cv2.CascadeClassifier(str(folder / "animeface.xml"))
         _MODELS["yunet"] = cv2.FaceDetectorYN.create(str(folder / "yunet.onnx"), "", (320, 320), 0.6)
         _MODELS["dino"] = ort.InferenceSession(str(folder / "dinov2s.onnx"), providers=["CPUExecutionProvider"])
+        from manhwa.gpu import onnx_providers
+
+        _MODELS["ccip"] = ort.InferenceSession(str(folder / "ccip_feat.onnx"), providers=onnx_providers())
     return _MODELS
 
 
@@ -146,6 +159,21 @@ def embed(image):
     return v / (np.linalg.norm(v) + 1e-9)
 
 
+def embed_ccip(image):
+    """Description CCIP d'une tête (vecteur de norme 1), calculée sur sa vignette.
+
+    Toujours à la taille de la vignette (THUMB) : une tête décrite au moment de l'analyse
+    et une tête redécrite plus tard depuis sa vignette donnent le même vecteur.
+    """
+    import cv2
+
+    small = cv2.resize(image, (THUMB, THUMB), interpolation=cv2.INTER_AREA) if image.shape[:2] != (THUMB, THUMB) else image
+    x = cv2.resize(cv2.cvtColor(small, cv2.COLOR_BGR2RGB), (384, 384), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+    x = ((x / 255 - 0.5) / 0.5).transpose(2, 0, 1)[None]
+    v = _models()["ccip"].run(None, {"input": x})[0][0]
+    return v / (np.linalg.norm(v) + 1e-9)
+
+
 def cluster(vecs, threshold=MATCH):
     """Regroupement hiérarchique (lien moyen) : listes d'indices, les plus grands groupes d'abord."""
     n = len(vecs)
@@ -175,24 +203,27 @@ def faces_key(analysis, frames):
     return fingerprint(FACES_VERSION, analysis and analysis["key"], [(f["file"], f["crop"]) for f in frames])
 
 
-def assign(faces, vecs, known, rejected, new_character):
+def assign(faces, vecs, known, rejected, new_character, ident=None):
     """Range chaque visage : personnage déjà connu, nouveau groupe, ou « autres visages ».
 
-    known : {id de personnage: centre}, rejected : vecteurs des formes écartées.
+    vecs : DINOv2 (comparés aux formes écartées) ; ident : CCIP (reconnaître et regrouper),
+    sinon DINOv2 pour tout. known : {id de personnage: centre} dans l'espace de ident.
     new_character() crée un personnage sans nom et renvoie son id.
     """
+    ident = vecs if ident is None else ident
+    match, group_at = (MATCH, MATCH) if ident is vecs else (CCIP_MATCH, CCIP_GROUP)
     rest = []
-    for i, (face, v) in enumerate(zip(faces, vecs)):
+    for i, (face, v, w) in enumerate(zip(faces, vecs, ident)):
         if rejected and max(float(v @ r) for r in rejected) >= NOT_FACE_MATCH:
             face.update(char=None, not_face=True)
             continue
-        scores = {cid: float(v @ c) for cid, c in known.items()}
+        scores = {cid: float(w @ c) for cid, c in known.items()}
         best = max(scores, key=scores.get, default=None)
-        if best is not None and scores[best] >= MATCH:
+        if best is not None and scores[best] >= match:
             face["char"] = best
         else:
             rest.append(i)
-    for group in cluster([vecs[i] for i in rest]):
+    for group in cluster([ident[i] for i in rest], group_at):
         cid = new_character() if len(group) >= 2 else None  # un visage seul : à ranger à la main
         for j in group:
             faces[rest[j]]["char"] = cid

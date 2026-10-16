@@ -41,7 +41,7 @@ def chapter(tmp_path):
     v = np.eye(4, dtype=np.float32)
     v[1] = v[0]  # a et b : la même tête ; c et d : différentes
     cast.vectors_path(ch).parent.mkdir(parents=True, exist_ok=True)
-    np.savez(cast.vectors_path(ch), ids=np.array(["a", "b", "c", "d"]), vecs=v)
+    np.savez(cast.vectors_path(ch), ids=np.array(["a", "b", "c", "d"]), vecs=v, ccip=v)
     return ch, hero, thug
 
 

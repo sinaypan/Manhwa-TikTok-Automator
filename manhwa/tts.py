@@ -126,7 +126,12 @@ def run_tts(chapter, cfg, force=False, progress=None):
         return 0
     chapter.audio_dir.mkdir(parents=True, exist_ok=True)
     print(f"  Génération de {len(todo)} répliques...")
-    asyncio.run(_run(chapter, list(todo.values()), cfg, progress))
+    try:
+        asyncio.run(_run(chapter, list(todo.values()), cfg, progress))
+    finally:
+        from manhwa import chatterbox_tts
+
+        chatterbox_tts.close()  # libère la carte graphique avant le rendu
     _remove_unused(chapter, data)
     return len(todo)
 

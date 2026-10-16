@@ -181,7 +181,7 @@ def run_textfix(chapter, cfg=None, progress=None):
         reviews = frame.setdefault("review", {})
         for b in frame.get("bubbles") or []:
             r = reviews.get(b["text"])
-            if r and r.get("by") != "local":
+            if r and (r.get("by") != "local" or r.get("checked")):
                 continue  # GPT ou toi êtes passés par là : on n'y touche pas
             text, kind, changes = local_fix(b, protected)
             if not changes:

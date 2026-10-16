@@ -15,12 +15,12 @@ STEP_LABELS = {"frames": "Frames", "ocr": "Lecture du texte", "tts": "Voix", "re
                "faces": "Recherche des visages", "wiki": "Lecture du wiki", "wiki_images": "Images du wiki",
                "wiki_faces": "Visages du wiki", "review": "Relecture GPT", "voices": "Choix des voix",
                "sounds": "Sons des cases sans texte", "scene": "Ce que montrent les cases",
-               "textfix": "Correction du texte", "listen": "Réécoute de la voix",
+               "textfix": "Correction du texte", "listen": "Réécoute de la voix", "pilot": "Pilote automatique", "parts": "Découpe en parties",
                "download": "Téléchargement"}
 # ce que l'on compte à chaque étape (« 6 210 / 12 960 images »)
 STEP_UNITS = {"frames": "frames", "ocr": "frames lues", "tts": "voix", "render": "images", "faces": "frames", "wiki": "",
               "wiki_images": "images", "wiki_faces": "images", "review": "lots", "voices": "", "sounds": "",
-              "scene": "cases", "textfix": "", "listen": "répliques", "download": ""}
+              "scene": "cases", "textfix": "", "listen": "répliques", "pilot": "", "parts": "parties", "download": ""}
 IMPORT_ID = "import"  # l'import n'a pas encore de chapitre : il a sa propre ligne
 
 
@@ -68,6 +68,8 @@ class Jobs:
         from manhwa.review import run_review
         from manhwa.scene import run_scene
         from manhwa.listen import run_listen
+        from manhwa.parts import run_parts
+        from manhwa.pilot import run_pilot
         from manhwa.textfix import run_textfix
         from manhwa.sfx import suggest_actions
         from manhwa.tts import run_tts
@@ -85,6 +87,8 @@ class Jobs:
             "scene": lambda c, p: run_scene(c, cfg, progress=p),
             "textfix": lambda c, p: run_textfix(c, cfg, progress=p),
             "listen": lambda c, p: run_listen(c, cfg, progress=p),
+            "pilot": lambda c, p: run_pilot(c, cfg, progress=p),
+            "parts": lambda c, p: run_parts(c, cfg, progress=p),
             "tts": lambda c, p: run_tts(c, cfg, progress=p),
             "render": lambda c, p: run_render(c, cfg, progress=p),
             "wiki_images": lambda c, p: wiki.fetch_images(series_dir(c), progress=p),
@@ -92,8 +96,8 @@ class Jobs:
         }
         plans = {
             "make": ["frames", "ocr", "textfix", "tts", "render", "listen?"],
-            "auto": ["frames", "ocr", "textfix", "faces", "scene?", "wiki?", "review?", "voices?", "sounds?", "tts", "render",
-                     "listen?"],
+            "auto": ["frames", "ocr", "textfix", "faces", "scene?", "wiki?", "review?", "voices?", "sounds?", "pilot?", "tts",
+                     "render", "listen?", "parts?"],
             "wiki_images": ["wiki_images", "wiki_faces"],
         }
         if kind == "import":

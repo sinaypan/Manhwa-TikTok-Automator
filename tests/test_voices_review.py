@@ -217,3 +217,82 @@ def test_automatic_voices_differ_by_accent_pitch_and_age():
             {"voice": {"name": "v", "pitch": "+0Hz", "by": "user"}, "voice_ok": True}, {"voice": {"name": "w", "pitch": "+0Hz"}}]
     assert voices.spread(crew)
     assert [c["voice"]["pitch"] for c in crew] == ["+0Hz", "+8Hz", "+0Hz", "+0Hz"]  # ton choix n'est pas touché
+
+
+def test_checked_bubbles_are_the_truth(chapter, monkeypatch):
+    ch, hero = chapter
+    cfg = load_config()
+    data = ch.load()
+    keys = [b["key"] for b in review.all_bubbles(data)]
+    assert keys == ["frame_0001.jpg#0", "frame_0001.jpg#1", "frame_0002.jpg#0"]
+    review.check_bubble(data, "frame_0001.jpg#0", text="I DON'T THINK I CAN GO.", checked=True)
+    review.check_bubble(data, "frame_0002.jpg#0", kind="narration", checked=True)
+    with pytest.raises(ValueError):
+        review.check_bubble(data, "frame_0002.jpg#0", kind="joie")
+    rows = {b["key"]: b for b in review.all_bubbles(data)}
+    assert rows["frame_0001.jpg#0"]["text"] == "I DON'T THINK I CAN GO." and rows["frame_0001.jpg#0"]["checked"]
+    assert rows["frame_0002.jpg#0"]["kind"] == "narration" and not rows["frame_0001.jpg#1"]["checked"]
+    ch.save(data)
+
+    # GPT repasse : il complète le ton mais ne change plus une bulle vérifiée
+    llm.save_settings(base="https://x/v1", key="sk-test-123456")
+    monkeypatch.setattr(review, "ask", lambda items, *a: {i["id"]: {"text": "WRONG", "kind": "dialogue", "speaker": "unknown",
+                                                                     "emotion": "sad"} for i in items})
+    review.run_review(ch, cfg)
+    rows = {b["key"]: b for b in review.all_bubbles(ch.load())}
+    assert rows["frame_0001.jpg#0"]["text"] == "I DON'T THINK I CAN GO." and rows["frame_0002.jpg#0"]["kind"] == "narration"
+    from manhwa import textfix
+
+    textfix.run_textfix(ch)
+    assert {b["key"]: b for b in review.all_bubbles(ch.load())}["frame_0001.jpg#0"]["text"] == "I DON'T THINK I CAN GO."
+
+
+def test_kokoro_voices_are_listed_and_read_in_normal_case():
+    from manhwa import kokoro_tts
+
+    names = [v["name"] for v in kokoro_tts.catalog()]
+    assert "kokoro:am_michael" in names and len(names) == 28
+    assert {v["gender"] for v in kokoro_tts.catalog() if v["name"].startswith("kokoro:bf_")} == {"Female"}
+    assert kokoro_tts.label("kokoro:bm_george") == "George (UK, Kokoro)" == voices.short_name("kokoro:bm_george")
+    assert kokoro_tts.readable("I DON'T THINK SO. YOU? i AM HERE") == "I don't think so. You? I am here"
+    assert kokoro_tts.readable("Already in normal case.") == "Already in normal case."
+
+
+def test_pilot_accepts_gpt_and_sure_speakers_but_never_your_choices(chapter, monkeypatch):
+    from manhwa import pilot
+
+    ch, hero = chapter
+    cfg = load_config()
+    llm.save_settings(base="https://x/v1", key="sk-test-123456")
+    monkeypatch.setattr(review, "ask", lambda items, *a: {
+        "frame_0001.jpg#0": {"text": "I DON'T THINK I CAN GO.", "kind": "dialogue", "speaker": "Hero", "emotion": "sad"},
+        "frame_0002.jpg#0": {"text": "Long ago, in the east...", "kind": "narration", "speaker": "narrator", "emotion": "calm"},
+    })
+    review.run_review(ch, cfg)  # lancée à la main : tout attend ta décision
+    data = ch.load()
+    assert {p["state"] for p in review.proposals(data, cast.load_cast(ch))} == {"pending"}
+    review.decide(data, [{"key": "frame_0002.jpg#0", "field": "kind", "state": "rejected"}])
+    ch.save(data)
+
+    cfg["auto"] = {"sounds": True, "review": True, "speakers": 0.0}
+    pilot.run_pilot(ch, cfg)  # pendant « Tout faire »
+    items = {(p["key"], p["field"]): p for p in review.proposals(ch.load(), cast.load_cast(ch))}
+    assert items[("frame_0001.jpg#0", "text")]["state"] == "accepted" and items[("frame_0001.jpg#0", "text")]["auto"]
+    assert items[("frame_0002.jpg#0", "kind")]["state"] == "rejected"  # ton refus reste
+    assert pilot.summary(ch, ch.load(), cfg)["textes"] == 1
+    data = ch.load()
+    review.decide(data, [{"key": "frame_0001.jpg#0", "field": "text", "state": "rejected"}])
+    assert not {(p["key"], p["field"]): p for p in review.proposals(data, cast.load_cast(ch))}[("frame_0001.jpg#0", "text")]["auto"]
+
+
+def test_expressive_voice_carries_the_emotion():
+    cfg = load_config()
+    plain = voices.prosody(cfg, {"name": "en-US-AndrewNeural"}, "angry")
+    assert "expressive" not in plain  # sans la case cochée : rien ne change (mêmes fichiers qu'avant)
+    rich = voices.prosody(cfg, {"name": "en-US-AndrewNeural", "expressive": True}, "angry")
+    assert rich["expressive"] and rich["emotion"] == "angry"
+    assert cast.clean_voice({"name": "en-US-AndrewNeural", "expressive": True})["expressive"]
+    assert "expressive" not in cast.clean_voice({"name": "en-US-AndrewNeural"})
+    from manhwa import chatterbox_tts
+
+    assert chatterbox_tts.INTENSITY["shouting"] > chatterbox_tts.INTENSITY["neutral"] > chatterbox_tts.INTENSITY["sad"]

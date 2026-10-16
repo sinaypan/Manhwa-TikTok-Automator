@@ -60,6 +60,7 @@ def freeze(chapter):
             bubbles[f"{frame['file']}#{b['index']}"] = {
                 "orig": b["orig"], "kind": b["kind"], "text": b["text"], "speaker": speakers.get(b["orig"]),
                 "emotion": r.get("emotion"), "emotion_by": "user" if r.get("emotion_by") == "user" else ("gpt" if r.get("emotion") else None),
+                "checked": bool(r.get("checked")),
             }
     faces = {f["id"]: ("not_face" if f.get("not_face") else f.get("char")) for f in chapter_faces(data)}
     sounds = {s["key"]: s["sound"] for s in sfx.spots(data) + sfx.silent_frames(data) if s["chosen"]}
@@ -68,7 +69,8 @@ def freeze(chapter):
     path = _path(chapter, GOLD_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(gold, ensure_ascii=False, indent=1), encoding="utf-8")
-    return {"bulles": len(bubbles), "qui parle": sum(1 for b in bubbles.values() if b["speaker"]),
+    return {"bulles": len(bubbles), "vérifiées à la main": sum(b["checked"] for b in bubbles.values()),
+            "qui parle": sum(1 for b in bubbles.values() if b["speaker"]),
             "visages": sum(1 for v in faces.values() if v), "tons": sum(1 for b in bubbles.values() if b["emotion"]),
             "sons": len(sounds)}
 
@@ -108,7 +110,10 @@ def score_kinds(data, gold, predict=None, chapter=None):
     wrong = [r for r in rows if r[1] != r[2]]
     heard = [r for r in wrong if (r[1] in SPOKEN) != (r[2] in SPOKEN)]  # lu alors qu'il ne faut pas, ou l'inverse
     confusion = Counter(f"{p} → {g}" for _, p, g, _ in wrong)
+    checked = {key for key, _, _, g in _pairs(data, gold) if g.get("checked")}
+    sure = [r for r in rows if r[0] in checked]
     return ({"justes": _pct(len(rows) - len(wrong), len(rows)), "bulles": len(rows), "erreurs": len(wrong),
+             "justes sur les bulles vérifiées": _pct(sum(r[1] == r[2] for r in sure), len(sure)),
              "erreurs qui s'entendent": len(heard), "confusions": dict(confusion.most_common(6))},
             [{"bulle": k, "proposé": p, "attendu": g, "texte": t} for k, p, g, t in wrong])
 
@@ -187,10 +192,13 @@ def score_faces(chapter, data, gold, embed=None, threshold=None):
     import numpy as np
 
     from manhwa.cast import _load_vectors, chapter_faces, faces_dir
-    from manhwa.faces import MATCH, cluster
+    from manhwa.faces import CCIP_GROUP, MATCH, cluster
 
     labels = {fid: lab for fid, lab in gold["faces"].items() if lab}  # visages rangés ou écartés
-    if embed:
+    if embed is None:  # la chaîne : CCIP sur les vignettes
+        vecs = _load_vectors(chapter, "ccip")
+        threshold = threshold or CCIP_GROUP
+    elif embed:
         vecs = {}
         for fid in labels:
             path = faces_dir(chapter) / f"{fid}.jpg"

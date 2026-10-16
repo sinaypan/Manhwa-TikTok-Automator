@@ -12,7 +12,7 @@ const JOB_STEPS = [
   ['listen', 'Réécoute de la voix'],
 ];
 // étape d'un travail → case de la barre d'avancement (Pages, Découpe, Texte, Voix, Vidéo)
-const STEP_BAR = { frames: 1, ocr: 2, textfix: 2, faces: 2, scene: 2, wiki: 2, review: 2, voices: 2, sounds: 2, tts: 3, render: 4, listen: 4 };
+const STEP_BAR = { frames: 1, ocr: 2, textfix: 2, faces: 2, scene: 2, wiki: 2, review: 2, voices: 2, sounds: 2, pilot: 2, tts: 3, render: 4, listen: 4, parts: 4 };
 const KIND_STEPS = {
   faces: [['faces', 'Recherche des visages']],
   wiki: [['wiki', 'Lecture du wiki']],
@@ -35,11 +35,14 @@ const AUTO_STEPS = [
   ['review', 'Relecture GPT'],
   ['voices', 'Choix des voix'],
   ['sounds', 'Sons'],
+  ['pilot', 'Pilote automatique'],
   ['tts', 'Voix'],
   ['render', 'Rendu vidéo'],
   ['listen', 'Réécoute de la voix'],
+  ['parts', 'Parties pour TikTok'],
 ];
 KIND_STEPS.listen = [['listen', 'Réécoute de la voix']];
+KIND_STEPS.parts = [['parts', 'Découpe en parties']];
 const KIND_TITLES = { auto: 'Tout faire', faces: 'Recherche des personnages', wiki: 'Lecture du wiki', wiki_images: 'Images du wiki', review: 'Relecture par GPT', voices: 'Choix des voix par GPT', sounds: 'Sons proposés par GPT', scene: 'Ce que montrent les cases' };
 const SCREENS = [
   ['cut', 'Découpe'],
@@ -200,6 +203,9 @@ const state = {
   editing: null, // relecture : la proposition que l'on corrige soi-même
   reviewRecent: [], // relecture : les dernières décisions (en tête de « Déjà décidées »)
   reviewInflight: 0,
+  reviewMode: 'proposals', // relecture : 'proposals' (ce que GPT ou la correction locale propose) ou 'all' (toutes les bulles)
+  bubbles: null, // toutes les bulles du chapitre (mode 'all')
+  bubbleKeys: new Set(), // bulles encore à vérifier
   autoAnalyzed: new Set(), // chapitres dont on a déjà lancé la recherche de visages tout seul
 };
 
@@ -1513,7 +1519,7 @@ function lineRow(l) {
       'div',
       { class: 'line-body' },
       el('p', { class: 'quote', text: `« ${l.text} »` }),
-      el('div', { class: 'line-meta' }, emotionSelect(l), l.kind !== 'dialogue' ? el('span', { class: 'chip', text: { thought: 'pensée', narration: 'narration' }[l.kind] || l.kind }) : null),
+      el('div', { class: 'line-meta' }, emotionSelect(l), l.kind !== 'dialogue' ? el('span', { class: 'chip', text: { thought: 'pensée', narration: 'narration' }[l.kind] || l.kind }) : null, l.auto ? el('span', { class: 'chip', title: 'Validé par le pilote automatique ([auto] speakers)', text: 'validé d’office' }) : null),
       el(
         'div',
         { class: 'who-chips' },
@@ -1672,7 +1678,7 @@ function playSample(button, params) {
   playing = button;
   button.classList.add('on', 'loading');
   const v = voiceOf(params.char);
-  const q = new URLSearchParams({ id: state.chapter.id, ...(v ? { name: v.name, pitch: v.pitch || '+0Hz', rate: v.rate || '+0%' } : {}), ...params });
+  const q = new URLSearchParams({ id: state.chapter.id, ...(v ? { name: v.name, pitch: v.pitch || '+0Hz', rate: v.rate || '+0%', expressive: v.expressive ? '1' : '' } : {}), ...params });
   player.src = `/api/voice_sample?${q}`;
   player.play().catch(() => toast('Extrait impossible (connexion à la voix ?)')).finally(() => button.classList.remove('loading'));
   player.onended = () => {
@@ -1707,6 +1713,9 @@ function voiceRow(ch) {
       el('button', { type: 'button', class: 'link quiet', title: 'Plus grave', onclick: () => shift(-6) }, '−'),
       el('span', { class: 'muted', text: pitch ? `${pitch > 0 ? '+' : ''}${pitch} Hz` : 'hauteur' }),
       el('button', { type: 'button', class: 'link quiet', title: 'Plus aigu', onclick: () => shift(6) }, '+')),
+    state.cast.expressive
+      ? el('button', { type: 'button', class: `chip-btn plain${v.expressive ? ' on' : ''}`, title: 'Voix plus vivante (Chatterbox, local) : le ton change avec l’émotion de chaque réplique', onclick: () => updateChar(ch.id, { voice: { ...v, expressive: !v.expressive } }) }, icon('sparkles'), 'Expressive')
+      : null,
     ch.voice_ok
       ? el('span', { class: 'voice-ok' }, icon('check'), 'validée')
       : el('button', { type: 'button', class: 'chip-btn plain proposed', title: v.reason || '', onclick: () => updateChar(ch.id, { voice_ok: true }) }, icon('check'), 'Valider'),
@@ -1837,6 +1846,7 @@ async function openReview() {
   const id = state.chapter.id;
   $('#view').replaceChildren(el('div', { class: 'head', id: 'head' }), el('div', { id: 'review' }, el('div', { class: 'skeleton short' })));
   state.review = null;
+  state.bubbles = null;
   renderHead();
   try {
     const r = await api(`/api/review?id=${enc(id)}`);
@@ -1866,13 +1876,128 @@ async function runReview() {
   }
 }
 
+function reviewModes() {
+  const r = state.review;
+  const pending = r.items.filter((x) => x.state === 'pending').length;
+  const todo = state.bubbles ? state.bubbles.filter((b) => !b.checked).length : null;
+  const set = (mode) => {
+    state.reviewMode = mode;
+    if (mode === 'all' && !state.bubbles) return openBubbles();
+    renderReview();
+  };
+  return el(
+    'div',
+    { class: 'tabs small review-modes' },
+    [
+      ['proposals', `Propositions · ${pending} à décider`],
+      ['all', todo == null ? 'Toutes les bulles' : `Toutes les bulles · ${todo} à vérifier`],
+    ].map(([key, label]) => el('button', { type: 'button', class: state.reviewMode === key ? 'on' : '', onclick: () => set(key) }, label)),
+  );
+}
+
+async function openBubbles() {
+  const id = state.chapter.id;
+  try {
+    const res = await api(`/api/bubbles?id=${enc(id)}`);
+    if (state.chapter?.id !== id) return;
+    state.bubbles = res.bubbles;
+    state.bubbleKeys = new Set(res.bubbles.filter((b) => !b.checked).map((b) => b.key));
+    renderReview();
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+function bubblesSection() {
+  // chaque bulle du chapitre, une à une : son vrai texte, son vrai type, « c'est bon »
+  const all = state.bubbles;
+  const queue = all.filter((b) => state.bubbleKeys.has(b.key));
+  const rest = all.filter((b) => !state.bubbleKeys.has(b.key));
+  return el(
+    'section',
+    { class: 'cast-block', id: 'bubble-block' },
+    el('div', { class: 'block-head' },
+      el('h3', { text: `Toutes les bulles · ${queue.length} à vérifier` }),
+      el('p', { class: 'muted', text: 'Corrige le texte si la lecture s’est trompée, choisis le type (une pensée, un encadré de narration, un bruitage…), puis « C’est bon » (ou Entrée). La bulle se range en bas et la suivante arrive. Ce que tu vérifies ici sert aussi de référence pour mesurer la machine.' })),
+    el('div', { class: 'bar' }, el('span', { style: `width:${all.length ? (100 * rest.length) / all.length : 0}%` })),
+    queue.length
+      ? el('div', { class: 'lines queue', id: 'bubble-queue' }, queue.map(bubbleRow))
+      : el('div', { class: 'notice queue-empty' }, icon('check'), el('p', { text: 'Toutes les bulles sont vérifiées. Pour changer d’avis : la liste juste dessous.' })),
+    doneList('bubble-done', `Déjà vérifiées · ${rest.length}`, rest.map(bubbleRow)),
+  );
+}
+
+function bubbleRow(b) {
+  const r = state.review;
+  const view = reviewView(b, 0.5);
+  const done = !state.bubbleKeys.has(b.key);
+  const text = el('textarea', { class: 'field bubble-text', rows: 2, spellcheck: 'false', text: b.text, 'aria-label': 'Texte de la bulle' });
+  text.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      checkBubble(b, { text: text.value, checked: true });
+    }
+  });
+  const kinds = el('div', { class: 'who-chips' },
+    Object.entries(r.kinds).map(([k, label]) =>
+      el('button', { type: 'button', class: `chip-btn plain${b.kind === k ? ' on' : ''}`, onclick: () => checkBubble(b, { kind: k, text: text.value }) }, label)),
+    r.kinds[b.kind] ? null : el('span', { class: 'chip', text: b.kind }));
+  return el(
+    'div',
+    { class: `line-row bubble-row${done ? ' done' : ''}`, 'data-key': b.key },
+    reviewShot(b, view, 360),
+    el('div', { class: 'line-body' },
+      b.orig !== b.text ? el('p', { class: 'muted small', text: `Lu sur l’image : ${b.orig}` }) : null,
+      text,
+      kinds,
+      el('div', { class: 'who-chips' },
+        done
+          ? [el('span', { class: 'state-badge accepted' }, icon('check'), 'Vérifiée'),
+             el('button', { type: 'button', class: 'link quiet', onclick: () => checkBubble(b, { checked: false }) }, 'Remettre à vérifier')]
+          : el('button', { type: 'button', class: 'pill accent', onclick: () => checkBubble(b, { text: text.value, checked: true }) }, icon('check'), 'C’est bon'))),
+  );
+}
+
+async function checkBubble(b, changes) {
+  const id = state.chapter.id;
+  const body = { key: b.key, ...changes };
+  if (body.text != null && body.text.trim() === b.text) delete body.text; // rien de changé dans le texte
+  try {
+    const res = await api(`/api/bubbles/check?id=${enc(id)}`, { method: 'POST', body: JSON.stringify(body) });
+    if (state.chapter?.id !== id) return;
+    state.bubbles = res.bubbles;
+    if (changes.checked === false) {
+      state.bubbleKeys.add(b.key);
+      return renderReview();
+    }
+    const fresh = res.bubbles.find((x) => x.key === b.key);
+    document.querySelector(`#bubble-block .line-row[data-key="${CSS.escape(b.key)}"]`)?.replaceWith(bubbleRow(fresh));
+    if (changes.checked && state.bubbleKeys.has(b.key))
+      settle(b.key, 2, () => {
+        state.bubbleKeys.delete(b.key);
+        afterSettle(b.key, bubblesSection());
+        const tabs = $('.review-modes');
+        tabs?.replaceWith(reviewModes());
+        // la suivante est prête à corriger au clavier
+        $('#bubble-queue .bubble-text')?.focus({ preventScroll: true });
+      });
+    if (body.text != null || body.kind) state.review = await api(`/api/review?id=${enc(id)}`);
+  } catch (e) {
+    toast(`Non enregistré : ${e.message}`);
+  }
+}
+
 function renderReview() {
   const box = $('#review');
   const r = state.review;
   if (!box || !r) return;
   renderHead();
+  if (state.reviewMode === 'all' && state.bubbles) {
+    box.replaceChildren(reviewModes(), bubblesSection());
+    return;
+  }
   const job = reviewJob();
-  const parts = [];
+  const parts = [reviewModes()];
   if (job?.kind === 'review' && (isRunning(job) || job.status === 'error')) parts.push(jobCard(job));
   if (!r.gpt.configured) {
     parts.push(el('div', { class: 'notice' }, icon('alert'), el('p', {}, 'Pas de clé GPT. ', el('button', { type: 'button', class: 'link', onclick: openSettings }, 'Colle-la ici'), ' (elle reste sur ton ordinateur, dans .env).')));
@@ -2006,7 +2131,7 @@ function reviewRow(item) {
         item.state === 'pending'
           ? [el('button', { type: 'button', class: 'chip-btn plain', onclick: () => decideOne(item, 'accepted') }, icon('check'), 'Accepter'),
              el('button', { type: 'button', class: 'chip-btn plain', onclick: () => decideOne(item, 'rejected') }, icon('x'), 'Refuser')]
-          : [el('span', { class: `state-badge ${item.state}` }, icon(accepted ? 'check' : 'x'), accepted ? 'Acceptée' : 'Refusée (on garde l’original)'),
+          : [el('span', { class: `state-badge ${item.state}` }, icon(accepted ? 'check' : 'x'), accepted ? (item.auto ? 'Acceptée d’office' : 'Acceptée') : 'Refusée (on garde l’original)'),
              el('button', { type: 'button', class: 'link quiet', onclick: () => decideOne(item, accepted ? 'rejected' : 'accepted') }, accepted ? 'Refuser plutôt' : 'Accepter plutôt'),
              el('button', { type: 'button', class: 'link quiet', onclick: () => decideOne(item, 'pending') }, 'Remettre à décider')])),
   );
@@ -2043,7 +2168,7 @@ async function decideOne(item, stateName, value) {
 
 document.addEventListener('keydown', (e) => {
   // relecture au clavier : A accepter, R refuser, E corriger soi-même
-  if (state.screen !== 'review' || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (state.screen !== 'review' || state.reviewMode !== 'proposals' || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.id === 'edit-text') {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -2227,8 +2352,10 @@ function renderSounds() {
       { class: 'card music-card' },
       el('button', { type: 'button', class: 'play', 'aria-label': 'Écouter la musique', disabled: !s.music, onclick: (e) => playUrl(e.currentTarget, '/api/music') }, icon('play')),
       el('div', { class: 'grow' },
-        el('b', { text: s.music ? `Musique de fond : ${s.music}` : 'Pas de musique de fond' }),
-        el('p', { class: 'muted', text: 'Elle tourne en boucle et baisse quand on parle. Pour la changer : dépose un MP3 dans le dossier music/ du projet (le premier par ordre alphabétique est pris), ou indique-le dans config.toml.' })),
+        el('b', { text: s.moods ? 'Musique selon l’ambiance : calme, tension, combat, tristesse' : s.music ? `Musique de fond : ${s.music}` : 'Pas de musique de fond' }),
+        el('p', { class: 'muted', text: s.moods
+          ? 'Elle change avec la scène (ce que montre l’image, le ton des répliques) et baisse quand on parle. Pour mettre tes morceaux : un MP3 dans music/calm/, music/tension/, music/combat/ ou music/sad/ (sinon une nappe générée, sans droits).'
+          : 'Elle tourne en boucle et baisse quand on parle. Pour la changer : dépose un MP3 dans le dossier music/ du projet (le premier par ordre alphabétique est pris), ou indique-le dans config.toml.' })),
     ),
   ];
   const job = findEpisode(state.current)?.job || s.job;
@@ -2414,13 +2541,57 @@ function renderVideo() {
       el('div', { class: 'video-side' },
         el('div', { class: 'card', id: 'now' }),
         el('div', { class: 'card', id: 'checks' }),
+        el('div', { class: 'card', id: 'parts' }),
         el('div', { class: 'card', id: 'flags' }))),
   );
   if (!v.timeline.length) {
     $('#now').replaceChildren(el('p', { class: 'muted', text: 'Recrée la vidéo une fois pour pouvoir signaler un passage précis (la nouvelle vidéo garde l’emplacement de chaque case).' }));
   } else renderNow(0, true);
   renderChecks();
+  renderParts();
   renderFlags();
+}
+
+function renderParts() {
+  // les parties de 60–90 s pour TikTok : la vidéo, le titre et les hashtags à copier
+  const v = state.videoInfo;
+  const card = $('#parts');
+  if (!card) return;
+  const job = findEpisode(state.current)?.job || v.job;
+  const busy = isRunning(job);
+  const id = state.chapter.id;
+  const copy = async (p) => {
+    try {
+      await navigator.clipboard.writeText(`${p.title}\n${p.hashtags.join(' ')}`);
+      toast('Titre et hashtags copiés');
+    } catch {
+      toast('Copie impossible : sélectionne le texte à la main');
+    }
+  };
+  const make = async () => {
+    try {
+      const j = await api(`/api/parts?id=${enc(id)}`, { method: 'POST' });
+      const ep = findEpisode(id);
+      if (ep) ep.job = j;
+      renderParts();
+      schedulePoll(500);
+    } catch (e) {
+      toast(`Impossible : ${e.message}`);
+    }
+  };
+  fill(card,
+    el('div', { class: 'row-between' },
+      el('h3', { text: v.parts.length ? `Parties pour TikTok · ${v.parts.length}` : 'Parties pour TikTok' }),
+      el('button', { type: 'button', class: 'pill', disabled: busy, onclick: make }, busy && job?.kind === 'parts' ? el('span', { class: 'spinner' }) : icon('scissors'), v.parts.length ? 'Refaire' : 'Découper')),
+    v.parts.length
+      ? el('div', { class: 'flag-list' },
+          v.parts.map((p, i) =>
+            el('div', { class: 'part' },
+              el('a', { class: 'link', href: `/api/part_video?id=${enc(id)}&k=${i + 1}`, target: '_blank', title: 'Ouvrir ou enregistrer la vidéo' }, `${i + 1} · ${fmtTime(p.start)}–${fmtTime(p.end)}`),
+              el('div', { class: 'grow' }, el('b', { text: p.title }), el('p', { class: 'muted', text: p.hashtags.join(' ') })),
+              el('button', { type: 'button', class: 'chip-btn plain', onclick: () => copy(p) }, 'Copier'))))
+      : el('p', { class: 'muted', text: 'Coupe la vidéo en parties de 60 à 90 s, sur des moments de suspense, avec « PART 2/5 » à l’écran, un titre et des hashtags.' }),
+  );
 }
 
 function renderChecks() {
@@ -2433,8 +2604,10 @@ function renderChecks() {
     state.focusFrame = c.frame;
     switchScreen(where[c.kind] || 'cast');
   };
+  const auto = Object.entries(v.auto || {}).filter(([, n]) => n);
   fill(card,
     el('h3', { text: v.checks.length ? `Contrôle automatique · ${v.checks.length} à revoir` : 'Contrôle automatique' }),
+    auto.length ? el('p', { class: 'muted', text: `Décidé d’office par la machine : ${auto.map(([k, n]) => `${n} ${k}`).join(', ')} (tout se change dans les onglets).` }) : null,
     v.checks.length
       ? el('div', { class: 'flag-list' },
           v.checks.map((c) =>

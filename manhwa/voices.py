@@ -47,7 +47,14 @@ EMOTION_LABELS = {
 # ---------- Liste des voix ----------
 
 def list_voices():
-    """Voix anglaises d'edge-tts : [{"name", "gender", "locale", "traits"}] (mises en cache)."""
+    """Voix anglaises : edge-tts (en ligne) puis Kokoro (local) — [{"name", "gender", "locale", "traits"}]."""
+    from manhwa import kokoro_tts
+
+    return _edge_voices() + (kokoro_tts.catalog() if kokoro_tts.available() else [])
+
+
+def _edge_voices():
+    """Voix anglaises d'edge-tts (mises en cache)."""
     path = CACHE / "voices.json"
     if path.is_file() and time.time() - path.stat().st_mtime < VOICES_TTL:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -68,7 +75,11 @@ def list_voices():
 
 
 def short_name(name):
-    """« en-US-GuyNeural » → « Guy (US) »."""
+    """« en-US-GuyNeural » → « Guy (US) » ; « kokoro:am_michael » → « Michael (US, Kokoro) »."""
+    from manhwa import kokoro_tts
+
+    if kokoro_tts.is_kokoro(name):
+        return kokoro_tts.label(name)
     m = re.match(r"en-([A-Z]{2})-(\w+?)Neural$", name or "")
     return f"{m.group(2)} ({m.group(1)})" if m else (name or "")
 
@@ -213,11 +224,24 @@ def prosody(cfg, voice, emotion=None):
     rate = base_rate * speed * (1 + _number(voice.get("rate"), 50) / 100) * (1 + e_rate / 100)
     pitch = _number(voice.get("pitch"), 50) + e_pitch
     volume = _number(cfg["tts"]["volume"], 100) + e_volume
-    return {"voice": voice["name"], "rate": f"{round((rate - 1) * 100):+d}%", "pitch": f"{pitch:+d}Hz",
-            "volume": f"{max(-90, min(100, volume)):+d}%"}
+    out = {"voice": voice["name"], "rate": f"{round((rate - 1) * 100):+d}%", "pitch": f"{pitch:+d}Hz",
+           "volume": f"{max(-90, min(100, volume)):+d}%"}
+    if voice.get("expressive"):  # Chatterbox rejoue la voix avec l'émotion (chatterbox_tts.py)
+        out["expressive"] = True
+        out["emotion"] = emotion or "neutral"
+    return out
 
 
 async def synthesize(text, path, params):
+    from manhwa import kokoro_tts
+
+    if params.get("expressive"):
+        from manhwa import chatterbox_tts
+
+        if chatterbox_tts.available():
+            return await asyncio.to_thread(chatterbox_tts.synthesize, text, path, params)
+    if kokoro_tts.is_kokoro(params["voice"]):  # voix locale : à côté, pour ne pas bloquer les autres
+        return await asyncio.to_thread(kokoro_tts.synthesize, text, path, params)
     import edge_tts
 
     tmp = path.with_suffix(".part")

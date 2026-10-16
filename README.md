@@ -2,10 +2,12 @@
 
 Transforme un chapitre de manhwa/webtoon en vidéo verticale 9:16 avec voix off.
 
-**État : V2, phase 1.** Les chapitres arrivent dans `inbox/`, la découpe en cases est
-automatique et se retouche en quelques clics dans le **Studio** (une page web locale),
-puis OCR → voix → vidéo. La suite (OCR local, GPT-4.1, sous-titres, bruitages…) est
-décrite dans [PLAN_V2.md](PLAN_V2.md).
+**État : V3.** Un lien suffit : le Studio (une page web locale) télécharge le chapitre, le
+découpe, lit le texte et le corrige, reconnaît les personnages, choisit voix, sons et
+musique, crée la vidéo avec sous-titres karaoké, la réécoute, puis la coupe en parties
+de 60–90 s pour TikTok avec titre et hashtags. Tout se vérifie et se corrige d'un clic.
+Le détail et les mesures sont dans [PLAN_V2.md](PLAN_V2.md) et [PLAN_V3.md](PLAN_V3.md)
+(chaque modèle local n'est gardé que s'il fait mieux sur le banc de mesure).
 
 ## Installation
 
@@ -25,8 +27,9 @@ Copie `.env.example` en `.env` pour les clés d'API (utilisées à partir de la 
 `.env` n'est jamais commité.
 
 **Carte graphique NVIDIA** (facultatif) : la lecture du texte devient environ 26× plus
-rapide (0,07 s par case au lieu de 1,7 s sur une RTX 3050). Voir
-[requirements-gpu.txt](requirements-gpu.txt) ; `[ocr] device = "auto"` la prend toute seule.
+rapide (0,07 s par case au lieu de 1,7 s sur une RTX 3050), et Whisper, Kokoro et les
+détecteurs aussi. Voir [requirements-gpu.txt](requirements-gpu.txt) ;
+tout la prend seul quand elle est là.
 
 ## Utilisation
 
@@ -85,6 +88,13 @@ une vérification, une fenêtre de navigateur s'ouvre : passe-la, la suite conti
 Sur un chapitre déjà là, **Tout faire** lance les mêmes étapes. Sans clé GPT, les étapes
 GPT sont simplement sautées.
 
+**Pilote automatique** (`config.toml` → `[auto]`) : pendant « Tout faire », la machine
+décide seule ce qui est sûr. Elle met le son proposé, accepte les corrections de GPT et
+peut valider « qui parle » à partir d'une confiance réglable. Rien n'est caché : c'est
+marqué « d'office » dans le Studio et se change d'un clic. Un choix fait à la main n'est
+jamais remplacé. Le bouton **Mettre à jour la vidéo** apparaît dès qu'un changement n'est
+pas encore dans la vidéo.
+
 #### Onglet Vidéo
 
 La vidéo, et à côté la case en cours (qui parle, avec quelle voix, quel son). Un passage
@@ -92,11 +102,26 @@ cloche ? Un clic sur la raison (mauvaise voix, texte faux, mauvais son, découpe
 moment. La liste des passages signalés permet de revoir chacun et **Corriger** ouvre
 l'onglet qu'il faut, sur la bonne case.
 
+**Contrôle automatique** : après la vidéo, Whisper (local) réécoute chaque réplique et
+signale celles où la voix ne dit pas ce qui est écrit (« La voix a dit… »). Il signale
+aussi une voix manquante et une case trop courte ou trop longue. Sur le ch. 1, il a
+trouvé 4 vraies erreurs, sans fausse alerte.
+
+**Sous-titres karaoké** : la réplique s'affiche par groupes de 4 mots et le mot dit passe
+en jaune (`[render] captions…`).
+
+**Parties pour TikTok** : « Découper » coupe la vidéo en parties de 60 à 90 s, de
+préférence sur un moment de suspense (une question, un cri, avant une nouvelle scène).
+Chaque partie s'ouvre sur « PART 2/5 » et reçoit un titre et des hashtags, que
+« Copier » met dans le presse-papiers. Les fichiers sont dans `<chapitre>/parts/`.
+
 #### Onglet Personnages
 
 Une fois la vidéo créée, l'onglet **Personnages** cherche tout seul les visages dans les
-frames et les range par personnage (≈ 20 s pour un chapitre, sur le processeur). Les
-modèles (≈ 90 Mo) sont téléchargés au premier usage dans `.cache/models/`.
+frames et les range par personnage (≈ 20 s pour un chapitre). CCIP, un modèle fait pour
+reconnaître un personnage d'anime, les regroupe et reconnaît ceux de la série d'un
+épisode à l'autre : sur le ch. 1, il y a 14 visages à déplacer au lieu de 23. Les modèles
+sont téléchargés au premier usage dans `.cache/models/` et vérifiés par leur empreinte.
 
 | Geste | Effet |
 |---|---|
@@ -179,12 +204,17 @@ visages, ton, sons) par rapport à tes choix, utilise `python -m manhwa bench <c
 
 #### Voix
 
-Chaque personnage a sa voix (edge-tts) : **Proposer les voix** laisse GPT-4.1 la choisir
-d'après son genre, son caractère (wiki) et ses répliques ; ▶ pour écouter, la liste pour
-changer, − / + pour une voix plus grave ou plus aiguë, **Valider**. Le narrateur lit les
-encadrés de narration et les répliques sans personnage. Chaque réplique est lue avec la
-voix de son personnage (validé, sinon proposé) et son ton : « en colère » parle plus fort
-et plus vite, « triste » plus bas et plus lentement…
+Chaque personnage a sa voix : **Proposer les voix** laisse GPT-4.1 la choisir d'après son
+genre, son caractère (wiki) et ses répliques. Sans GPT, les accents alternent, les hauteurs
+sont décalées, et un personnage âgé selon le wiki parle plus grave. ▶ pour écouter, la
+liste pour changer, − / + pour une voix plus grave ou plus aiguë, **Valider**.
+
+La liste mêle les voix edge-tts (en ligne, les plus claires) et les 28 voix **Kokoro**
+(locales, 6 à 8 fois plus rapides). **Expressive** fait rejouer la voix par Chatterbox
+(local) avec l'émotion de chaque réplique. Il demande l'environnement `.venv-tts`, voir
+`manhwa/chatterbox_tts.py`. Le narrateur lit les encadrés de narration et les répliques
+sans personnage. Chaque réplique a son ton : celui de GPT, le tien, sinon il est deviné
+sur la ponctuation (« ?! » donne surpris…).
 
 #### Onglet Relecture (GPT-4.1)
 
@@ -195,6 +225,16 @@ accord, sauf le ton, modifiable sur chaque réplique de l'onglet Personnages. En
 3 minutes pour un chapitre. Les propositions arrivent une à une : **Accepter** (`A`),
 **Refuser** (`R`) ou **Corriger moi-même** (`E`, ta version est gardée même si GPT relit
 à nouveau) ; la suivante prend sa place. « Déjà décidées », en bas, pour changer d'avis.
+
+Avant GPT, une **correction locale** recolle les mots collés (« IDON'T » → « I DON'T »),
+retire les lettres perdues et repère le charabia, sans jamais toucher aux noms de la
+série. Les cas moins sûrs (« AWAK » → « AWAKE ») attendent ici, marqués « Correction
+locale ».
+
+**Toutes les bulles** (deuxième onglet) : chaque bulle du chapitre, une à une. Tu
+corriges le texte, choisis le type (réplique, pensée, narration, bruitage, pas du texte),
+puis **C'est bon** (ou Entrée). Une bulle vérifiée n'est plus touchée par GPT, et elle
+sert de référence au banc de mesure.
 
 #### Onglet Sons
 
@@ -207,9 +247,11 @@ Un clic sur un son le joue et le choisit ; la case se range en bas au bout de 3 
 cœur sont fabriqués) ; tes propres sons se rangent dans `sfx/<catégorie>/`. Le son part au
 début de sa case, sous la voix.
 
-La **musique de fond** est le premier fichier du dossier `music/` (une nappe d'ambiance
-générée y est mise par défaut : remplace-la par le MP3 de ton choix). Elle baisse quand on
-parle. Au rendu, une case plus haute que l'écran défile en pleine largeur, les autres
+La **musique suit l'ambiance** : calme, tension, combat ou tristesse, d'après ce que
+montrent les cases et le ton des répliques. Elle change avec la scène, en fondu, et
+baisse quand on parle. Tes morceaux vont dans `music/calm/`, `music/tension/`,
+`music/combat/` et `music/sad/` ; sans eux, une nappe générée, libre de droits, est
+utilisée. Pour garder un seul morceau, mets son chemin dans `[render] music`. Au rendu, une case plus haute que l'écran défile en pleine largeur, les autres
 zooment très légèrement, et chaque case pousse la précédente vers le haut comme un
 webtoon qu'on fait défiler (`[render]` dans config.toml : `zoom`, `pan`, `transition`,
 `music_volume`…).

@@ -2228,6 +2228,18 @@ details.silent-block > summary .muted {
   }
 }
 
+/* Relecture : toutes les bulles */
+.review-modes {
+  margin-bottom: 12px;
+}
+
+.bubble-text {
+  width: 100%;
+  font: inherit;
+  font-size: 15px;
+  resize: vertical;
+}
+
 /* Personnages : les voix (narrateur, figurants) à part, les cartes tassées sans trous */
 .cast-grid.voices {
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -2248,4 +2260,30 @@ details.silent-block > summary .muted {
 .chip.source.local {
   background: color-mix(in srgb, var(--ok) 16%, transparent);
   color: var(--ok);
+}
+
+/* Vidéo : les parties pour TikTok */
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.part {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--sep);
+}
+
+.part .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.part p {
+  margin: 2px 0 0;
+  font-size: 12px;
 }

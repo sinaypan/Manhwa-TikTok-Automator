@@ -32,6 +32,7 @@ doute. GPT devient un **arbitre de secours**, plus le seul juge.
 | Modèle | Pour quoi | Licence | Verdict |
 |---|---|---|---|
 | **Magi v1 / v2 / v3** (ragavsachdeva) | cases, bulles, personnages, qui parle | « recherche académique uniquement » | ❌ exclu |
+| phonemizer, espeak-ng (pour Kokoro) | prononciation | GPL-3.0 | ⚠️ sans effet sur les vidéos ; à savoir si le programme était distribué |
 | **comic-text-and-bubble-detector** (ogkalu, ONNX int8) | bulles et zones de texte | Apache-2.0 | ✅ |
 | yolov8m_seg-speech-bubble (kitsumed) | masques de bulles | GPL-3.0 | ❌ évité (contamine le projet) |
 | **anime_face / anime_head / anime_person_detection** (deepghs, ONNX) | visages, têtes, corps | MIT | ✅ (exécutés avec onnxruntime, sans la bibliothèque Ultralytics qui est AGPL) |
@@ -45,7 +46,7 @@ doute. GPT devient un **arbitre de secours**, plus le seul juge.
 | **Florence-2 base / large** (Microsoft, ONNX) | décrire une case | MIT | ✅ |
 | Qwen2.5-VL-3B | décrire une case | Qwen Research (non commerciale) | ❌ |
 | Qwen2.5-VL-7B | décrire une case | Apache-2.0 | ⚠️ trop lourd pour 6 Go |
-| **Qwen2.5-7B-Instruct** (compressé Q4) | LLM local de secours | Apache-2.0 | ✅ (≈ 4,7 Go : à l'étroit) |
+| Qwen2.5-7B-Instruct (compressé Q4) | LLM local de secours | Apache-2.0 | essayé puis retiré : GPT reste le seul LLM |
 | Qwen2.5-3B-Instruct | LLM local léger | Qwen Research | ❌ |
 | Stable Audio Open (small / 1.0) | fabriquer des bruitages manquants | Stability AI Community (gratuit sous 1 M$ de revenus par an) | ⚠️ plus tard, à relire avant usage |
 | MusicGen (Meta) | musique | CC-BY-NC | ❌ |
@@ -107,6 +108,33 @@ Notes :
   processeur.
 - Pour décoder l'audio, on passe par le ffmpeg du rendu : `av` 19 n'accepte plus une
   option de faster-whisper.
+
+#### ✅ Phases 2 à 4 — gardé, abandonné (16/10/2026)
+
+| Chantier | Résultat sur le ch. 1 | Verdict |
+|---|---|---|
+| **Toutes les bulles** (Relecture) | chaque bulle vérifiée une à une (texte, type) ; GPT et la correction locale ne la touchent plus ; elle sert de référence forte au banc | ✅ — à faire sur l'épisode 2 pour mesurer le type de bulle |
+| **C1 + E1** pointe de la bulle (détecteur ogkalu, Apache-2.0) | 134 répliques sur 145 dans une bulle détectée, pointe trouvée sur 104 ; mais « qui parle » ne monte que de 71 % à 72,4 %. La vraie cause, vue sur les images : le visage de celui qui parle n'est souvent pas détecté (Munno), ou la case montre celui qui écoute | ❌ pas gardé (+1 réplique) |
+| **D1** têtes et corps (deepghs, MIT) | 263 têtes contre 70 visages (64 des 70 retrouvés) ; mais « qui parle » baisse (65 %) : plus de têtes, ce sont surtout plus de distracteurs | ❌ pas gardé (et 3,7× plus de visages à ranger) |
+| **D2–D3** CCIP (deepghs, OpenRAIL) | regroupement de zéro : 14 visages à déplacer au lieu de 23 ; reconnaître un personnage d'un épisode à l'autre : 47 justes au lieu de 43, autant d'erreurs (8) | ✅ CCIP regroupe et reconnaît ; DINOv2 reste pour le wiki (mieux séparé : bon ≈ 0,89, autre ≤ 0,76 ; CCIP : jusqu'à 0,87 pour un faux) |
+| **F1** émotion du texte (go_emotions, MIT) | 55,9 % contre 55,2 % pour la ponctuation seule (référence : le ton de GPT) | ❌ pas gardé (+1 réplique pour 125 Mo) ; à revoir avec des tons choisis à la main |
+| **B1** double lecture (OCR Windows) | Windows lit mal les bulles isolées (30 / 145 exactes) ; +1 réplique, déjà corrigée en local | ❌ pas gardé |
+| **G2** Kokoro (Apache-2.0) | 6 à 8× plus rapide qu'edge-tts (0,17 s par réplique sur la carte) ; 1 à 2 répliques sur 30 mal comprises par Whisper, contre 0 pour edge | ✅ en option par personnage, edge reste le défaut |
+| **G3** Chatterbox (MIT, `.venv-tts`) | ≈ 2,6 s par réplique, 3,4 Go de mémoire ; compris sans erreur par Whisper ; l'intensité suit l'émotion | ✅ case « Expressive » par personnage |
+| **H3** Florence-2 (MIT) | descriptions utiles (« une main qui tient une faux ») ; mais le son déduit de la description est moins bon : 50 à 62 % contre 79 % pour CLIP | ❌ pas gardé pour les sons ; pourrait servir de contexte au LLM |
+| **I** musique selon l'ambiance | combat au début (le grand-père) et pendant l'attaque des brigands (2:33–3:19), calme ailleurs ; nappes générées par ambiance, ou music/<ambiance>/ | ✅ (pas de référence pour mesurer : à juger à l'écoute) |
+| **K** LLM local (Qwen2.5-7B Q4, Apache-2.0) | tient sur la carte (13 jetons/s) ; sur le chapitre : 3 erreurs corrigées, 0 phrase abîmée, ≈ 6 min ; avec la correction locale : 4 | ❌ retiré à ta demande : GPT fait le travail de langue ; les modèles locaux, ce qu'ils font aussi bien ou mieux |
+| **J** pilote automatique | pendant « Tout faire » : sons d'office, corrections de GPT acceptées d'office, « qui parle » d'office au-dessus d'un seuil (désactivé : 79 % justes à 0,2) | ✅ tout est marqué « d'office » et se change |
+| Sous-titres karaoké | groupes de 4 mots, le mot dit en jaune ; instants répartis sur la voix, ou ceux de Whisper | ✅ |
+| Parties TikTok | ch. 1 : 6 parties de 64 à 89 s, qui finissent sur « WHAT? », « IS THIS MARTIAL ARTS..? », « A CHANCE...? » | ✅ titre et hashtags par GPT, sinon un modèle simple |
+
+Carte graphique : Whisper (CTranslate2) et onnxruntime-gpu 1.23.2 utilisent les
+bibliothèques CUDA 12 installées par paddlepaddle-gpu (`manhwa/gpu.py`). onnxruntime-gpu
+≥ 1.24 demande CUDA 13. Le détecteur de bulles passe de 0,6 s à 0,05 s par image.
+
+Prochaine étape : l'épisode 2 annoté en entier (toutes les bulles, qui parle réplique par
+réplique, un son par case choisi sans « Valider les propositions »). Il servira à refaire
+le banc sur un épisode qui n'a pas servi aux réglages.
 
 ### A. Réécouter la voix (Whisper) et contrôler la vidéo (M)
 **Remplace :** écouter la vidéo pour trouver les mots dits de travers.
@@ -306,7 +334,6 @@ cases 63 à 65).
 | Kokoro | 82 M paramètres | processeur ou carte |
 | Florence-2 base / large | 0,23 / 0,77 milliard | carte |
 | Chatterbox | ≈ 0,5 milliard, 3–4 Go | carte, seul |
-| Qwen2.5-7B Q4 | ≈ 4,7 Go | carte et mémoire vive, seul |
 
 ## Phases
 
@@ -314,9 +341,9 @@ cases 63 à 65).
 |---|---|---|---|
 | 0 | ✅ **Banc** | chantier 0 : `python -m manhwa bench <chapitre> [--freeze]`, confiance de « qui parle » | Le niveau d'aujourd'hui est mesuré sur le ch. 1 (voir plus haut) |
 | 1 | ✅ **Gains rapides, sans nouveau gros modèle** (E2 abandonné, C2–C3 reporté : voir plus haut) | A1 Whisper, A2 contrôle, B2–B3 texte, C2–C3 forme + CLIP, E2 alternance, F2 ponctuation, G1 voix distinctes, H1 pilote des sons, H2 onomatopées | Moins de la moitié des clics d'aujourd'hui sur le ch. 1 |
-| 2 | **Nouveaux modèles ONNX légers** | C1 bulles → E1 pointe, D1–D3 deepghs + CCIP, F1 émotion du texte, B1 double lecture, G2 Kokoro | « Qui parle » ≥ 90 %, types ≥ 90 %, visages ≥ 95 % |
-| 3 | **Modèles lourds** | G3 Chatterbox (venv à part), H3 Florence-2, I musique, K LLM local | Voix reconnaissables les yeux fermés, ambiances qui changent |
-| 4 | **Pilote automatique** | J | Lien → vidéo sans clic, < 15 doutes par chapitre |
+| 2 | ✅ **Nouveaux modèles ONNX légers** (CCIP et Kokoro gardés ; pointe, têtes, émotion, double lecture : mesurés, pas gardés) | C1 bulles → E1 pointe, D1–D3 deepghs + CCIP, F1 émotion du texte, B1 double lecture, G2 Kokoro | « Qui parle » ≥ 90 %, types ≥ 90 %, visages ≥ 95 % |
+| 3 | ✅ **Modèles lourds** (Chatterbox et musique gardés ; LLM local retiré, GPT reste ; Florence-2 pas gardé pour les sons) | G3 Chatterbox (venv à part), H3 Florence-2, I musique, K LLM local | Voix reconnaissables les yeux fermés, ambiances qui changent |
+| 4 | ✅ **Pilote automatique** | J | Lien → vidéo sans clic, < 15 doutes par chapitre |
 
 Les sous-titres karaoké et la découpe en parties de 60–90 s (PLAN_V2, phases 4–5)
 peuvent se faire en parallèle : ils ne dépendent que de A1 pour les temps des mots

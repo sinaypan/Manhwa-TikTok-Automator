@@ -163,6 +163,11 @@ def run_review(chapter, cfg, progress=None, force=False):
         }
         reviews = frame.setdefault("review", {})
         old = reviews.get(orig) or {}
+        if old.get("checked"):  # vérifiée à la main (« Toutes les bulles ») : GPT ne la change plus
+            reviews[orig] = {**old, "emotion": old.get("emotion") or proposal["emotion"],
+                             "sfx": old.get("sfx") or proposal["sfx"]}
+            changed += 1
+            continue
         state = {}
         current = {"text": orig, "kind": frame["bubbles"][int(index)]["kind"],
                    "speaker": (frame.get("speakers") or {}).get(orig)}
@@ -211,6 +216,7 @@ def proposals(data, crew):
                 out.append({
                     "key": f"{frame['file']}#{j}", "frame": frame["file"], "field": field, "state": state,
                     "by": r.get("by") or ("mine" if r.get("mine") else "gpt"),
+                    "auto": field in (r.get("auto") or []),
                     "old": labels.get(old, old) if field == "speaker" else old,
                     "new": labels.get(new, new) if field == "speaker" else new,
                     "text": b["text"], "box": b["box"], "crop": frame["crop"],
@@ -246,12 +252,64 @@ def decide(data, decisions):
             else:
                 continue
         r["state"][field] = state
+        if field in (r.get("auto") or []) and not d.get("_auto"):
+            r["auto"].remove(field)  # ta décision remplace celle du pilote
         if field == "speaker":
             speakers = frame.setdefault("speakers", {})
             if state == "accepted" and r.get("speaker"):
                 speakers[orig] = r["speaker"]
         n += 1
     return n
+
+
+# ---------- Toutes les bulles, vérifiées à la main ----------
+
+def _locate(data, key):
+    file, _, index = str(key).partition("#")
+    frame = next((f for f in data["frames"] if f["file"] == file), None)
+    if not frame or not index.isdigit() or int(index) >= len(frame.get("bubbles") or []):
+        raise ValueError("Bulle introuvable")
+    return frame, frame["bubbles"][int(index)]
+
+
+def all_bubbles(data):
+    """Chaque bulle du chapitre, telle que la voix la traitera : texte, type, vérifiée ou non."""
+    out = []
+    for frame in data["frames"]:
+        reviews = frame.get("review") or {}
+        for b in effective(frame):
+            r = reviews.get(b["orig"]) or {}
+            out.append({"key": f"{frame['file']}#{b['index']}", "frame": frame["file"], "orig": b["orig"],
+                        "text": b["text"], "kind": b["kind"], "box": b["box"], "crop": frame["crop"],
+                        "checked": bool(r.get("checked"))})
+    return out
+
+
+def check_bubble(data, key, text=None, kind=None, checked=None):
+    """Ta vérification d'une bulle : son vrai texte, son vrai type, et « c'est bon »."""
+    frame, bubble = _locate(data, key)
+    orig = bubble["text"]
+    r = frame.setdefault("review", {}).setdefault(orig, {"state": {}})
+    state = r.setdefault("state", {})
+    if r.get("by") == "local":
+        r["by"] = "mine"  # une correction locale que tu as revue devient la tienne
+    if text is not None:
+        text = " ".join(str(text).split())
+        if not text or len(text) > 500:
+            raise ValueError("Texte vide ou trop long")
+        if text != orig:
+            r["text"], state["text"], r["mine"] = text, "accepted", True
+        elif "text" in state:
+            state["text"] = "rejected"  # le texte lu était le bon : la correction proposée est refusée
+    if kind is not None:
+        if kind not in KINDS:
+            raise ValueError("Type de bulle inconnu")
+        if kind != bubble["kind"]:
+            r["kind"], state["kind"], r["mine"] = kind, "accepted", True
+        elif "kind" in state:
+            state["kind"] = "rejected"
+    if checked is not None:
+        r["checked"] = bool(checked)
 
 
 def set_emotion(data, key, emotion):

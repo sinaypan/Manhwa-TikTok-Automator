@@ -46,7 +46,15 @@ def render_key(chapter, data, cfg):
         parts.append([frame["file"], frame.get("crop"), stat and stat.st_size, stat and stat.st_mtime_ns, voices,
                       [os.path.basename(s) for s in sounds.get(frame["file"], [])]])
     music = music_file(cfg)
-    return fingerprint(parts, cfg["render"], cfg["output"], music and os.path.getsize(music))
+    mood = None
+    if cfg["render"].get("music_moods", True) and not (cfg["render"].get("music") or "").strip():
+        from manhwa import moods
+        from manhwa.scene import load_scene
+
+        scene = load_scene(chapter)
+        mood = ([moods.frame_mood(f, scene) for f in data["frames"]],
+                {m: os.path.getsize(p) for m, p in moods.tracks().items()})
+    return fingerprint(parts, cfg["render"], cfg["output"], music and os.path.getsize(music), mood)
 
 
 def _load_audio(path):
@@ -181,15 +189,10 @@ def _tall_image(strip, crop, out_w):
 
 # ---------- Son ----------
 
-def _music_track(path, durations, voiced, r):
-    """La musique en boucle, plus forte sur les cases sans voix, plus basse sous les voix."""
+def _duck(track, durations, voiced, r):
+    """Plus fort sur les cases sans voix, plus bas sous les voix."""
     import numpy as np
-    from moviepy.audio.fx import AudioFadeIn, AudioFadeOut, AudioLoop
 
-    music = _load_audio(path)
-    if music is None:
-        return None
-    total = sum(durations)
     ends = np.cumsum(durations)
     loud = float(r.get("music_volume", 0.16))
     quiet = loud * float(r.get("music_duck", 0.4))
@@ -204,8 +207,38 @@ def _music_track(path, durations, voiced, r):
         env = envelope(np.atleast_1d(t))
         return out * (env[:, None] if np.ndim(out) == 2 else env[0])
 
-    track = music.with_effects([AudioLoop(duration=total)]).transform(duck, keep_duration=True)
+    return track.transform(duck, keep_duration=True)
+
+
+def _music_track(path, durations, voiced, r):
+    """La musique en boucle, plus forte sur les cases sans voix, plus basse sous les voix."""
+    from moviepy.audio.fx import AudioFadeIn, AudioFadeOut, AudioLoop
+
+    music = _load_audio(path)
+    if music is None:
+        return None
+    track = _duck(music.with_effects([AudioLoop(duration=sum(durations))]), durations, voiced, r)
     return track.with_effects([AudioFadeIn(1.5), AudioFadeOut(2.5)])
+
+
+def _mood_track(secs, paths, durations, voiced, r, opened, fade=1.5):
+    """Une musique par ambiance (moods.py), fondu enchaîné d'une ambiance à l'autre."""
+    from moviepy import CompositeAudioClip
+    from moviepy.audio.fx import AudioFadeIn, AudioFadeOut, AudioLoop
+
+    total = sum(durations)
+    layers = []
+    for mood, a, b in secs:
+        src = _load_audio(paths[mood])
+        if src is None:
+            continue
+        opened.append(src)
+        start, end = max(0.0, a - fade / 2), min(total, b + fade / 2)
+        layers.append(src.with_effects([AudioLoop(duration=end - start), AudioFadeIn(fade), AudioFadeOut(fade)])
+                      .with_start(start))
+    if not layers:
+        return None
+    return _duck(CompositeAudioClip(layers).with_duration(total), durations, voiced, r)
 
 
 def run_render(chapter, cfg, force=False, progress=None):
@@ -240,7 +273,7 @@ def run_render(chapter, cfg, force=False, progress=None):
     if pan and any(f["crop"][3] / max(1, f["crop"][2]) > TALL for f in data["frames"]):
         strip, _ = load_strip(chapter.pages(), cfg["slicer"]["max_src_width"])
 
-    clips, audios, opened, durations, voiced, files = [], [], [], [], [], []
+    clips, audios, opened, durations, voiced, files, spoken = [], [], [], [], [], [], []
     for i, frame in enumerate(data["frames"]):
         img_path = chapter.frames_dir / frame["file"]
         image = read_image(img_path)
@@ -248,7 +281,13 @@ def run_render(chapter, cfg, force=False, progress=None):
             print(f"  [!] Frame manquante ignorée : {frame['file']}")
             continue
         # les répliques de la frame l'une après l'autre (une voix par personnage), un court blanc entre deux
-        pieces = [a for a in (_load_audio(chapter.root / seg["audio"]) for seg in frame.get("segments") or []) if a]
+        loaded = [(seg, _load_audio(chapter.root / seg["audio"])) for seg in frame.get("segments") or []]
+        loaded = [(seg, a) for seg, a in loaded if a]
+        pieces = [a for _, a in loaded]
+        t_in, said = 0.0, []  # où commence chaque réplique dans la frame (sous-titres)
+        for seg, a in loaded:
+            said.append((seg.get("text") or "", t_in, a.duration, seg.get("words")))
+            t_in += a.duration + GAP_SECONDS / speed
         if not pieces and frame.get("audio"):  # frame d'avant les voix par personnage
             pieces = [a for a in [_load_audio(chapter.root / frame["audio"])] if a]
         opened += pieces
@@ -277,6 +316,7 @@ def run_render(chapter, cfg, force=False, progress=None):
         durations.append(duration)
         voiced.append(bool(voice))
         files.append(frame["file"])
+        spoken.append(said)
 
     if not clips:
         print("  Rien à assembler.")
@@ -287,14 +327,28 @@ def run_render(chapter, cfg, force=False, progress=None):
     try:
         final, starts = timeline(clips, durations, r.get("transition", "slide"), float(r.get("transition_seconds", 0.3)))
         path = music_file(cfg)
-        music = _music_track(path, durations, voiced, r) if path else None
+        music = None
+        if r.get("music_moods", True) and not (r.get("music") or "").strip():
+            from manhwa import moods
+
+            music = _mood_track(moods.plan(chapter, data, durations, files), moods.tracks(), durations, voiced, r, opened)
+        elif path:
+            music = _music_track(path, durations, voiced, r)
         if music is not None:
             opened.append(music)
         layers = [a.with_start(t) for a, t in zip(audios, starts) if a is not None] + ([music] if music is not None else [])
+        if r.get("captions", True):
+            from manhwa.captions import burn, events
+
+            lines = [(text, start + t, d, words) for said, start in zip(spoken, starts) for text, t, d, words in said]
+            evts = events(lines, int(r.get("captions_words", 4)))
+            if evts:
+                final = burn(final, evts, cfg, int(out_h * 0.7))
         if layers:
             final = final.with_audio(CompositeAudioClip(layers).with_duration(final.duration))
+        # le son temporaire dans le dossier du chapitre : deux rendus en même temps ne se gênent pas
         final.write_videofile(str(tmp), fps=r["fps"], codec="libx264", audio_codec="aac",
-                              preset="ultrafast", threads=4,
+                              temp_audiofile=str(chapter.root / "video.part.audio.m4a"), preset="ultrafast", threads=4,
                               logger=_progress_logger(progress) if progress else "bar")
         final.close()
     finally:

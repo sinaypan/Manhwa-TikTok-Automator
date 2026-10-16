@@ -220,6 +220,7 @@ def create_app(cfg):
             "narrator_voice": narrator_voice(cfg, crew),
             "voices": voice_list(),
             "emotions": voices.EMOTION_LABELS,
+            "expressive": chatterbox_available(),
             "gpt": llm.public_settings(),
             "job": jobs.get(id),
         }
@@ -415,6 +416,11 @@ def create_app(cfg):
 
     # ---------- Voix ----------
 
+    def chatterbox_available():
+        from manhwa import chatterbox_tts
+
+        return chatterbox_tts.available()
+
     def voice_list():
         try:
             return [dict(v, label=voices.short_name(v["name"])) for v in voices.list_voices()]
@@ -442,7 +448,7 @@ def create_app(cfg):
 
     @app.get("/api/voice_sample")
     def voice_sample(id: str = Query(...), char: str = Query(...), name: str | None = Query(None),
-                     pitch: str | None = Query(None), rate: str | None = Query(None)):
+                     pitch: str | None = Query(None), rate: str | None = Query(None), expressive: str | None = Query(None)):
         """Un extrait de la voix : une réplique du personnage (ou une phrase type), avec ses réglages."""
         chapter = chapter_of(id)
         crew = cast.load_cast(chapter)
@@ -456,7 +462,7 @@ def create_app(cfg):
                 raise HTTPException(404, "Personnage inconnu")
             voice = c.get("voice") or narrator_voice(cfg, crew)
         if name:  # essai d'une autre voix avant de la choisir
-            voice = {"name": name, "pitch": pitch or "+0Hz", "rate": rate or "+0%"}
+            voice = {"name": name, "pitch": pitch or "+0Hz", "rate": rate or "+0%", "expressive": expressive == "1"}
         if voice["name"] not in {v["name"] for v in voice_list()}:
             raise HTTPException(422, "Voix inconnue")
         data = chapter.load()
@@ -490,6 +496,23 @@ def create_app(cfg):
     @app.get("/api/review")
     def review_get(id: str = Query(...)):
         return review_detail(id)
+
+    @app.get("/api/bubbles")
+    def bubbles_get(id: str = Query(...)):
+        """Toutes les bulles du chapitre, pour les vérifier une à une."""
+        return {"bubbles": review.all_bubbles(chapter_of(id).load())}
+
+    @app.post("/api/bubbles/check")
+    def bubbles_check(id: str = Query(...), payload: dict = Body(...)):
+        chapter = chapter_of(id)
+        with lock_for(id):
+            data = chapter.load()
+            try:
+                review.check_bubble(data, payload.get("key"), payload.get("text"), payload.get("kind"), payload.get("checked"))
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            chapter.save(data)
+        return {"bubbles": review.all_bubbles(data)}
 
     @app.post("/api/review/run")
     def review_run(id: str = Query(...)):
@@ -539,6 +562,7 @@ def create_app(cfg):
                 "scene_done": scene.scene_done(chapter, data),
                 "gpt": llm.public_settings(), "none": sfx.NONE, "library": ready,
                 "music": Path(music).name if music else None, "ocr_done": any("bubbles" in f for f in data["frames"]),
+                "moods": bool(cfg["render"].get("music_moods", True)) and not (cfg["render"].get("music") or "").strip(),
                 "job": jobs.get(id)}
 
     @app.get("/api/sounds")
@@ -614,11 +638,30 @@ def create_app(cfg):
                 "sounds": [Path(x).parent.name for x in sounds.get(file, [])],
             })
         from manhwa.listen import checks
+        from manhwa.pilot import summary
 
         return {"video": chapter.video_path.is_file(), "timeline": timeline, "flags": data.get("flags", []),
-                "reasons": FLAG_REASONS, "checks": checks(chapter, data),
+                "reasons": FLAG_REASONS, "checks": checks(chapter, data), "auto": summary(chapter, data, cfg),
+                "parts": data.get("parts") or [],
                 "listened": any("heard" in s for f in data["frames"] for s in f.get("segments") or []),
                 "job": jobs.get(id)}
+
+    @app.post("/api/parts")
+    def parts_make(id: str = Query(...)):
+        """Coupe la vidéo en parties de 60–90 s pour TikTok (titre et hashtags compris)."""
+        chapter = chapter_of(id)
+        if not chapter.video_path.is_file():
+            raise HTTPException(422, "Crée d'abord la vidéo")
+        return jobs.submit(id, chapter, kind="parts")
+
+    @app.get("/api/part_video")
+    def part_video(id: str = Query(...), k: int = Query(..., ge=1)):
+        from manhwa.parts import parts_dir
+
+        path = parts_dir(chapter_of(id)) / f"part-{k:02d}.mp4"
+        if not path.is_file():
+            raise HTTPException(404, "Partie introuvable")
+        return FileResponse(path, media_type="video/mp4", filename=f"{id.replace('/', ' - ')} - part {k}.mp4")
 
     @app.get("/api/video_info")
     def video_info(id: str = Query(...)):

@@ -8,6 +8,10 @@ pyspellchecker
 onnxruntime
 tokenizers
 faster-whisper
+# voix Kokoro (locale) : kokoro-onnx s'installe sans ses dépendances (il ramènerait onnxruntime) :
+#   uv pip install --no-deps kokoro-onnx==0.6.1
+phonemizer
+espeakng-loader
 Pillow
 edge-tts
 moviepy>=2.0.0

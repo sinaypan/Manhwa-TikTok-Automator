@@ -84,28 +84,48 @@ def chapter_faces(data):
     return (data.get("faces") or {}).get("list", [])
 
 
-def _load_vectors(chapter):
+def _load_vectors(chapter, kind="vecs"):
+    """{id de visage: vecteur} : kind « vecs » (DINOv2) ou « ccip ».
+
+    Un chapitre analysé avant CCIP reçoit ses vecteurs CCIP ici, depuis les vignettes.
+    """
     path = vectors_path(chapter)
     if not path.is_file():
         return {}
     with np.load(path) as z:
-        return dict(zip(z["ids"].tolist(), z["vecs"]))
+        stored = {k: z[k] for k in z.files}
+    ids = stored["ids"].tolist()
+    if kind == "ccip" and "ccip" not in stored:
+        from manhwa.faces import embed_ccip
+        from manhwa.images import read_image
+
+        vecs = []
+        for fid in ids:
+            thumb = faces_dir(chapter) / f"{fid}.jpg"
+            img = read_image(thumb) if thumb.is_file() else None
+            vecs.append(embed_ccip(img) if img is not None else np.zeros(768, np.float32))
+        stored["ccip"] = np.stack(vecs) if vecs else np.zeros((0, 768), np.float32)
+        tmp = path.with_suffix(".part.npz")
+        np.savez(tmp, **stored)
+        os.replace(tmp, path)
+    return dict(zip(ids, stored[kind]))
 
 
 def known_faces(chapter):
-    """Ce que la série sait déjà : {personnage: centre}, et les formes écartées (pas des visages)."""
+    """Ce que la série sait déjà : {personnage: centre CCIP}, et les formes écartées (DINOv2)."""
     sums, rejected = defaultdict(list), []
     for other in series_chapters(chapter):
         data = other.load()
         vecs = _load_vectors(other)
+        ident = _load_vectors(other, "ccip") if vecs else {}
         for face in chapter_faces(data):
             v = vecs.get(face["id"])
             if v is None:
                 continue
             if face.get("not_face"):
                 rejected.append(v)
-            elif face.get("char"):
-                sums[face["char"]].append(v)
+            elif face.get("char") and face["id"] in ident:
+                sums[face["char"]].append(ident[face["id"]])
     centers = {}
     for cid, vs in sums.items():
         c = np.mean(vs, axis=0)
@@ -144,7 +164,7 @@ def run_faces(chapter, cfg, force=False, progress=None):
     """Cherche les visages des frames du chapitre et les range par personnage."""
     import cv2
 
-    from manhwa.faces import THUMB, assign, detect, embed, faces_key, head_box
+    from manhwa.faces import THUMB, assign, detect, embed, embed_ccip, faces_key, head_box
     from manhwa.images import load_strip, write_jpeg
     from manhwa.panels import load_analysis
 
@@ -166,7 +186,7 @@ def run_faces(chapter, cfg, force=False, progress=None):
     for old in folder.glob("*.jpg"):
         old.unlink()
 
-    faces, vecs = [], []
+    faces, vecs, ident = [], [], []
     for i, frame in enumerate(frames):
         x, y, w, h = frame["crop"]
         crop = strip[y:y + h, x:x + w]
@@ -174,16 +194,19 @@ def run_faces(chapter, cfg, force=False, progress=None):
             hx, hy, hw, hh = head_box(box, w, h)
             head = crop[hy:hy + hh, hx:hx + hw]
             fid = f"f{len(faces) + 1:04d}"
-            write_jpeg(folder / f"{fid}.jpg", cv2.resize(head, (THUMB, THUMB), interpolation=cv2.INTER_AREA), 88)
+            thumb = cv2.resize(head, (THUMB, THUMB), interpolation=cv2.INTER_AREA)
+            write_jpeg(folder / f"{fid}.jpg", thumb, 88)
             faces.append({"id": fid, "frame": frame["file"], "box": box, "char": None})
             vecs.append(embed(head))
+            ident.append(embed_ccip(thumb))
         if progress:
             progress(i + 1, len(frames))
 
     cast = load_cast(chapter)
-    assign(faces, vecs, known, rejected, lambda: new_character(cast))
+    assign(faces, vecs, known, rejected, lambda: new_character(cast), ident=ident)
     tmp = vectors_path(chapter).with_suffix(".part.npz")
-    np.savez(tmp, ids=np.array([f["id"] for f in faces]), vecs=np.stack(vecs) if vecs else np.zeros((0, 384), np.float32))
+    np.savez(tmp, ids=np.array([f["id"] for f in faces]), vecs=np.stack(vecs) if vecs else np.zeros((0, 384), np.float32),
+             ccip=np.stack(ident) if ident else np.zeros((0, 768), np.float32))
     os.replace(tmp, vectors_path(chapter))
 
     data = chapter.load()
@@ -266,8 +289,11 @@ def clean_voice(voice, by="user"):
     voice = voice or {}
     if voice.get("name") not in {v["name"] for v in list_voices()}:
         raise ValueError("Voix inconnue")
-    return {"name": voice["name"], "pitch": hz(voice.get("pitch")), "rate": pct(voice.get("rate"), 30),
-            "reason": str(voice.get("reason") or "")[:120], "by": by}
+    out = {"name": voice["name"], "pitch": hz(voice.get("pitch")), "rate": pct(voice.get("rate"), 30),
+           "reason": str(voice.get("reason") or "")[:120], "by": by}
+    if voice.get("expressive"):
+        out["expressive"] = True  # rejouée par Chatterbox avec l'émotion de chaque réplique
+    return out
 
 
 # ---------- Noms proposés depuis le wiki ----------
@@ -460,6 +486,7 @@ def lines(data, cast):
                 "speaker": speaker,
                 "suggestion": ranked[0] if ranked else None,
                 "confidence": round(confidence, 3) if ranked else 0.0,
+                "auto": bubble["orig"] in (frame.get("speakers_auto") or []),
                 "candidates": ranked[:4],
                 "view": _view(frame, bubble, here),
                 "crop": frame["crop"],
@@ -480,6 +507,8 @@ def set_speakers(data, choices):
             continue
         text = bubbles[int(index)]["text"]
         speakers = frame.setdefault("speakers", {})
+        if text in (frame.get("speakers_auto") or []):
+            frame["speakers_auto"].remove(text)  # ton choix remplace celui du pilote
         if choice.get("char"):
             speakers[text] = choice["char"]
         else:
