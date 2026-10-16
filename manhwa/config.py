@@ -27,6 +27,7 @@ DEFAULTS = {
     "render": {"speed": 1.0, "fps": 24, "padding_seconds": 0.2, "silent_frame_seconds": 2.0,
                "zoom": 0.04, "pan": True, "music": "", "music_volume": 0.16, "music_duck": 0.4,
                "transition": "slide", "transition_seconds": 0.3},
+    "auto": {"sounds": True},
     "scraper": {
         "headless": False,
         "workers": 5,

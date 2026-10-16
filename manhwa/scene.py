@@ -54,8 +54,7 @@ CONCEPTS = [
 ]
 LOGIT_SCALE = 100.0  # celui de CLIP : rend les probabilités tranchées
 SHOW = 0.12          # « je vois » : à partir de cette probabilité
-SURE = 0.35          # le son est proposé d'office (en pointillés) à partir de celle-ci
-NEVER_SURE = {"cloth"}  # des robes, il y en a dans toutes les cases : proposé, jamais mis d'office
+PROPOSE = 0.05       # un son n'est proposé qu'à partir de celle-ci
 
 MEAN = np.array([0.48145466, 0.4578275, 0.40821073], np.float32)
 STD = np.array([0.26862954, 0.26130258, 0.27577711], np.float32)
@@ -195,11 +194,12 @@ def recommend(scene, gpt=None, limit=3):
     """Les sons à proposer pour une case : [catégorie], et celle à mettre d'office (ou None).
 
     scene : {"cats", "seen"} de la case ; gpt : la catégorie que GPT a proposée (s'il y en a).
+    Le premier son proposé est mis d'office : sur le ch. 1, c'est ton choix 79 fois sur 100
+    (contre 34 quand on n'en mettait que là où l'image était « sûre ») ; tu ne choisis
+    presque jamais « aucun son ».
     """
     cats = dict((scene or {}).get("cats") or {})
-    none = cats.pop("none", 0)
-    ranked = [c for c, p in sorted(cats.items(), key=lambda kv: -kv[1]) if p >= 0.05]
+    cats.pop("none", None)
+    ranked = [c for c, p in sorted(cats.items(), key=lambda kv: -kv[1]) if p >= PROPOSE]
     recs = ([gpt] if gpt else []) + [c for c in ranked if c != gpt]
-    sure = [c for c in ranked if c not in NEVER_SURE]
-    best = gpt or (sure[0] if sure and cats[sure[0]] >= SURE and cats[sure[0]] > none else None)
-    return recs[:limit], best
+    return recs[:limit], (recs[0] if recs else None)

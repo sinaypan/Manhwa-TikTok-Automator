@@ -2244,3 +2244,8 @@ details.silent-block > summary .muted {
   break-inside: avoid;
   margin-bottom: 12px;
 }
+
+.chip.source.local {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  color: var(--ok);
+}

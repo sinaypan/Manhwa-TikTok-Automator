@@ -35,9 +35,9 @@ def music_file(cfg):
 
 
 def render_key(chapter, data, cfg):
-    from manhwa.sfx import frame_sounds
+    from manhwa.sfx import video_sounds
 
-    sounds = frame_sounds(data)
+    sounds = video_sounds(chapter, data, cfg)
     parts = []
     for frame in data["frames"]:
         img = chapter.frames_dir / frame["file"]
@@ -223,7 +223,7 @@ def run_render(chapter, cfg, force=False, progress=None):
     from moviepy import CompositeAudioClip, concatenate_audioclips
 
     from manhwa.images import load_strip, read_image
-    from manhwa.sfx import VOLUME, ensure_library, frame_sounds
+    from manhwa.sfx import VOLUME, ensure_library, video_sounds
 
     r = cfg["render"]
     out_w, out_h = cfg["output"]["width"], cfg["output"]["height"]
@@ -233,7 +233,7 @@ def run_render(chapter, cfg, force=False, progress=None):
     sounds = {}
     try:
         ensure_library()
-        sounds = frame_sounds(data)
+        sounds = video_sounds(chapter, data, cfg)
     except Exception as e:
         print(f"  [!] Bruitages indisponibles ({e}) : vidéo sans bruitages")
     strip = None

@@ -88,11 +88,22 @@ def _pct(ok, n):
 
 # ---------- Les mesures ----------
 
-def score_kinds(data, gold, predict=None):
-    """Type de bulle : celui des règles de lecture (bubbles.py), avant toute relecture."""
+def _local(data, chapter=None):
+    """La correction locale (textfix.py) telle que la chaîne l'applique, bulle par bulle."""
+    from manhwa.textfix import local_fix, protected_words
+
+    texts = [b["text"] for f in data["frames"] for b in f.get("bubbles") or []]
+    protected = protected_words(chapter, texts)
+    return lambda b: local_fix(b, protected)
+
+
+def score_kinds(data, gold, predict=None, chapter=None):
+    """Type de bulle : règles de lecture (bubbles.py) + charabia repéré (textfix.py), sans relecture."""
     from manhwa.review import SPOKEN
 
-    predict = predict or (lambda frame, b: b["kind"])
+    if predict is None:
+        fix = _local(data, chapter)
+        predict = lambda frame, b: fix(b)[1]
     rows = [(key, predict(frame, b), g["kind"], b["text"]) for key, frame, b, g in _pairs(data, gold)]
     wrong = [r for r in rows if r[1] != r[2]]
     heard = [r for r in wrong if (r[1] in SPOKEN) != (r[2] in SPOKEN)]  # lu alors qu'il ne faut pas, ou l'inverse
@@ -102,11 +113,18 @@ def score_kinds(data, gold, predict=None):
             [{"bulle": k, "proposé": p, "attendu": g, "texte": t} for k, p, g, t in wrong])
 
 
-def score_text(data, gold, predict=None):
-    """Texte des répliques lues : celui de l'OCR, comparé au texte validé en relecture."""
+def score_text(data, gold, predict=None, chapter=None, propose=None):
+    """Texte des répliques lues : OCR + corrections locales sûres, comparé au texte validé.
+
+    propose : ce qui serait corrigé si tu acceptes aussi les propositions (à valider).
+    """
     from manhwa.review import SPOKEN
 
-    predict = predict or (lambda frame, b: b["text"])
+    if predict is None:
+        fix = _local(data, chapter)
+        sure = lambda b: (lambda t, k, ch: t if all(c["sure"] for c in ch) else b["text"])(*fix(b))
+        predict = lambda frame, b: sure(b)
+        propose = propose or (lambda frame, b: fix(b)[0])
     exact, hit, total, todo, fixed, broken, errors = 0, 0, 0, 0, 0, 0, []
     for key, frame, b, g in _pairs(data, gold):
         if g["kind"] not in SPOKEN:
@@ -123,8 +141,14 @@ def score_text(data, gold, predict=None):
         if not same:
             errors.append({"bulle": key, "lu": predict(frame, b), "attendu": g["text"]})
     n = exact + len(errors)
-    return ({"répliques exactes": _pct(exact, n), "mots justes": _pct(hit, total), "répliques": n,
-             "à corriger": todo, "corrigées": fixed, "abîmées": broken}, errors)
+    report = {"répliques exactes": _pct(exact, n), "mots justes": _pct(hit, total), "répliques": n,
+              "à corriger": todo, "corrigées": fixed, "abîmées": broken}
+    if propose:
+        both = [(words(g["text"]), words(propose(frame, b)), words(b["text"]))
+                for _, frame, b, g in _pairs(data, gold) if g["kind"] in SPOKEN]
+        report["corrigées si tu acceptes les propositions"] = sum(w == p != r for w, p, r in both)
+        report["abîmées si tu acceptes"] = sum(w == r != p for w, p, r in both)
+    return report, errors
 
 
 def score_speakers(data, gold, crew, predict=None):
@@ -199,10 +223,11 @@ def score_faces(chapter, data, gold, embed=None, threshold=None):
 
 
 def score_emotion(data, gold, predict=None):
-    """Ton : sans GPT tout est neutre ; la référence est le ton de GPT, ou le tien."""
+    """Ton deviné sans GPT (ponctuation, emotion.py) ; la référence est le ton de GPT, ou le tien."""
+    from manhwa.emotion import guess
     from manhwa.review import SPOKEN
 
-    predict = predict or (lambda frame, b, g: "neutral")
+    predict = predict or (lambda frame, b, g: guess(b["text"]))
     rows = [(key, predict(frame, b, g), g["emotion"], g["emotion_by"], g["text"])
             for key, frame, b, g in _pairs(data, gold) if g["kind"] in SPOKEN and g["emotion"]]
     mine = [r for r in rows if r[3] == "user"]
@@ -222,7 +247,7 @@ def score_sounds(chapter, data, gold):
     rows = [(k, items[k]["proposed"], want, want in items[k]["recs"] or (want == sfx.NONE))
             for k, want in gold["sounds"].items() if k in items]
     with_sound = [r for r in rows if r[2] != sfx.NONE]
-    return ({"choisis": len(rows), "même son proposé": _pct(sum(r[1] == r[2] for r in rows), len(rows)),
+    return ({"choisis": len(rows), "même son proposé (dans la vidéo sans toi)": _pct(sum(r[1] == r[2] for r in rows), len(rows)),
              "dans les 3 proposés": _pct(sum(r[3] for r in rows), len(rows)), "avec un son": len(with_sound)},
             [{"son": k, "proposé": p, "attendu": w} for k, p, w, _ in rows if p != w])
 
@@ -241,8 +266,9 @@ def _versions():
     from manhwa.bubbles import BUBBLES_VERSION
     from manhwa.faces import FACES_VERSION
     from manhwa.scene import SCENE_VERSION
+    from manhwa.textfix import TEXTFIX_VERSION
 
-    return {"bubbles": BUBBLES_VERSION, "faces": FACES_VERSION, "scene": SCENE_VERSION}
+    return {"bubbles": BUBBLES_VERSION, "faces": FACES_VERSION, "scene": SCENE_VERSION, "textfix": TEXTFIX_VERSION}
 
 
 def run_bench(chapter, steps=None, save=True):
@@ -254,8 +280,8 @@ def run_bench(chapter, steps=None, save=True):
     crew = load_cast(chapter)
     steps = steps or STEPS
     runs = {
-        "kinds": lambda: score_kinds(data, gold),
-        "text": lambda: score_text(data, gold),
+        "kinds": lambda: score_kinds(data, gold, chapter=chapter),
+        "text": lambda: score_text(data, gold, chapter=chapter),
         "speakers": lambda: score_speakers(data, gold, crew),
         "faces": lambda: score_faces(chapter, data, gold),
         "emotion": lambda: score_emotion(data, gold),

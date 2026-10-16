@@ -13,6 +13,7 @@ le personnage attendent qu'on les valide dans le Studio (onglet Relecture).
 """
 import json
 
+from manhwa.emotion import guess
 from manhwa.voices import EMOTIONS
 
 SPOKEN = ("dialogue", "thought", "narration")      # lus par une voix
@@ -32,7 +33,8 @@ def effective(frame):
     for j, b in enumerate(frame.get("bubbles") or []):
         r = reviews.get(b["text"]) or {}
         state = r.get("state") or {}
-        e = dict(b, orig=b["text"], index=j, emotion=r.get("emotion") or "neutral", sfx=r.get("sfx"))
+        # le ton : celui de GPT ou le tien, sinon deviné sur la ponctuation (emotion.py)
+        e = dict(b, orig=b["text"], index=j, emotion=r.get("emotion") or guess(b["text"]), sfx=r.get("sfx"))
         if state.get("text") == "accepted" and r.get("text"):
             e["text"] = r["text"]
         if state.get("kind") == "accepted" and r.get("kind") in KINDS:
@@ -208,6 +210,7 @@ def proposals(data, crew):
                 new = r.get(field)
                 out.append({
                     "key": f"{frame['file']}#{j}", "frame": frame["file"], "field": field, "state": state,
+                    "by": r.get("by") or ("mine" if r.get("mine") else "gpt"),
                     "old": labels.get(old, old) if field == "speaker" else old,
                     "new": labels.get(new, new) if field == "speaker" else new,
                     "text": b["text"], "box": b["box"], "crop": frame["crop"],

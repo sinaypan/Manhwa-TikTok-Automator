@@ -87,6 +87,27 @@ Ce qu'on en tire :
   été revues, donc les 100 % sont trop flatteurs. À compléter quand l'écran des types
   montrera toutes les bulles.
 
+#### ✅ Phase 1 — ce qui a été gardé, et ce qui ne l'a pas été (16/10/2026)
+
+| Chantier | Résultat sur le ch. 1 | Verdict |
+|---|---|---|
+| **B2–B3 texte** (`textfix.py`) | 3 des 10 erreurs corrigées d'office (mots collés, lettres perdues), 5 si tu acceptes les propositions, **0 bonne phrase abîmée** ; charabia : la seule bulle de charabia est repérée (1 → 0 erreur entendue) | ✅ gardé, dans la chaîne après la lecture |
+| **F2 ton** (`emotion.py`) | 56 % d'accord avec le ton de GPT, contre 50 % pour « tout neutre » | ✅ gardé (seulement quand ni GPT ni toi n'avez donné de ton) |
+| **H1 sons** | le son mis d'office est le tien 79 fois sur 100, contre 34 ; tu ne choisis presque jamais « aucun son » | ✅ gardé : le 1er proposé va dans la vidéo tant que tu ne choisis pas (`[auto] sounds`) |
+| **H2 onomatopées** | aucun effet ici (bruitages coréens illisibles), utile pour les séries aux bruitages traduits | ✅ gardé |
+| **G1 voix** | accents alternés, hauteurs décalées, âge du wiki ; les voix du ch. 1 étaient déjà distinctes | ✅ gardé |
+| **A1 Whisper** (`listen.py`) | 1 min 20 pour le chapitre (répliques mises bout à bout, processeur) ; sur 10 répliques mal lues, 6 signalées, 0 fausse alerte sur 15 bonnes ; sur le chapitre relu, **4 alertes, toutes réelles** (une fois les noms de la série et les interjections sautés) | ✅ gardé, après le rendu (facultatif) |
+| **A2 contrôle** | onglet Vidéo : voix qui ne dit pas le texte, voix manquante, case trop courte ou trop longue | ✅ gardé |
+| **E2 alternance** | 71,7 % contre 71 % ; même en connaissant la réplique d'avant : 66,9 % | ❌ abandonné : la case montre souvent celui qui écoute. La pointe de la bulle (E1) devient la priorité de la phase 2 |
+| **C2–C3 forme des bulles** | impossible à mesurer : aucune pensée ni narration dans la référence du ch. 1 | ⏸ reporté : il faut une référence (épisode 2 annoté en entier) |
+
+Notes :
+- Whisper ne tourne pas encore sur la carte graphique : il manque les bibliothèques
+  cuBLAS et cuDNN pour CTranslate2, et l'essai reste bloqué. Il tourne donc sur le
+  processeur.
+- Pour décoder l'audio, on passe par le ffmpeg du rendu : `av` 19 n'accepte plus une
+  option de faster-whisper.
+
 ### A. Réécouter la voix (Whisper) et contrôler la vidéo (M)
 **Remplace :** écouter la vidéo pour trouver les mots dits de travers.
 - **A1.** Après la voix, chaque réplique (`frame["segments"]`) est retranscrite par
@@ -292,7 +313,7 @@ cases 63 à 65).
 | # | Phase | Contenu | Fini quand… |
 |---|---|---|---|
 | 0 | ✅ **Banc** | chantier 0 : `python -m manhwa bench <chapitre> [--freeze]`, confiance de « qui parle » | Le niveau d'aujourd'hui est mesuré sur le ch. 1 (voir plus haut) |
-| 1 | **Gains rapides, sans nouveau gros modèle** | A1 Whisper, A2 contrôle, B2–B3 texte, C2–C3 forme + CLIP, E2 alternance, F2 ponctuation, G1 voix distinctes, H1 pilote des sons, H2 onomatopées | Moins de la moitié des clics d'aujourd'hui sur le ch. 1 |
+| 1 | ✅ **Gains rapides, sans nouveau gros modèle** (E2 abandonné, C2–C3 reporté : voir plus haut) | A1 Whisper, A2 contrôle, B2–B3 texte, C2–C3 forme + CLIP, E2 alternance, F2 ponctuation, G1 voix distinctes, H1 pilote des sons, H2 onomatopées | Moins de la moitié des clics d'aujourd'hui sur le ch. 1 |
 | 2 | **Nouveaux modèles ONNX légers** | C1 bulles → E1 pointe, D1–D3 deepghs + CCIP, F1 émotion du texte, B1 double lecture, G2 Kokoro | « Qui parle » ≥ 90 %, types ≥ 90 %, visages ≥ 95 % |
 | 3 | **Modèles lourds** | G3 Chatterbox (venv à part), H3 Florence-2, I musique, K LLM local | Voix reconnaissables les yeux fermés, ambiances qui changent |
 | 4 | **Pilote automatique** | J | Lien → vidéo sans clic, < 15 doutes par chapitre |

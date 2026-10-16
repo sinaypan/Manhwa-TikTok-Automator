@@ -479,7 +479,7 @@ def create_app(cfg):
         items = review.proposals(data, crew)
         return {
             "gpt": llm.public_settings(),
-            "done": any(f.get("review") for f in data["frames"]),
+            "done": any(r.get("by") != "local" for f in data["frames"] for r in (f.get("review") or {}).values()),
             "ocr_done": any("bubbles" in f for f in data["frames"]),
             "items": items,
             "kinds": {"dialogue": "réplique", "thought": "pensée", "narration": "narration", "sfx": "bruitage",
@@ -602,7 +602,7 @@ def create_app(cfg):
         labels[cast.NARRATOR] = "Narrateur"
         labels.update({k: v[0] for k, v in cast.EXTRAS.items()})
         frames = {f["file"]: f for f in data["frames"]}
-        sounds = sfx.frame_sounds(data)
+        sounds = sfx.video_sounds(chapter, data, cfg)
         timeline = []
         for k, (file, start, duration) in enumerate((data["steps"].get("render") or {}).get("timeline") or []):
             frame = frames.get(file) or {}
@@ -613,8 +613,12 @@ def create_app(cfg):
                           for seg in frame.get("segments") or []],
                 "sounds": [Path(x).parent.name for x in sounds.get(file, [])],
             })
+        from manhwa.listen import checks
+
         return {"video": chapter.video_path.is_file(), "timeline": timeline, "flags": data.get("flags", []),
-                "reasons": FLAG_REASONS, "job": jobs.get(id)}
+                "reasons": FLAG_REASONS, "checks": checks(chapter, data),
+                "listened": any("heard" in s for f in data["frames"] for s in f.get("segments") or []),
+                "job": jobs.get(id)}
 
     @app.get("/api/video_info")
     def video_info(id: str = Query(...)):

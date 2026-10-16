@@ -64,6 +64,7 @@ def ensure_models(models=None):
         path = folder / name
         if path.is_file() and _sha256(path) == sha:
             continue
+        path.parent.mkdir(parents=True, exist_ok=True)  # un modèle en plusieurs fichiers a son dossier
         print(f"  Téléchargement du modèle {name}...")
         tmp = path.with_suffix(path.suffix + ".part")
         with requests.get(url, stream=True, timeout=60) as r:

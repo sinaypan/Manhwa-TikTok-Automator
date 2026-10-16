@@ -15,11 +15,10 @@ def test_tall_panels_are_cut_in_overlapping_squares():
 def test_recommendations_from_the_image_and_gpt():
     fire = {"cats": {"fire": 0.6, "none": 0.3, "wood": 0.2, "cloth": 0.1}, "seen": {"du feu": 0.6, "du bois": 0.2}}
     assert scene.recommend(fire) == (["fire", "wood", "cloth"], "fire")
-    # pas sûr (sous SURE, ou moins que « rien ») : proposé, mais pas mis d'office
-    assert scene.recommend({"cats": {"slash": 0.3, "none": 0.6}}) == (["slash"], None)
-    assert scene.recommend({"cats": {"slash": 0.5, "none": 0.7}}) == (["slash"], None)
-    # des robes partout : jamais mis d'office ; GPT passe devant
-    assert scene.recommend({"cats": {"cloth": 0.9, "none": 0.1}})[1] is None
+    # le premier proposé est mis d'office, même peu sûr ; trop faible (< PROPOSE) : rien
+    assert scene.recommend({"cats": {"slash": 0.3, "none": 0.6}}) == (["slash"], "slash")
+    assert scene.recommend({"cats": {"cloth": 0.9, "none": 0.1}}) == (["cloth"], "cloth")
+    assert scene.recommend({"cats": {"slash": 0.02, "none": 0.9}}) == ([], None)
     assert scene.recommend(fire, gpt="door") == (["door", "fire", "wood"], "door")
     assert scene.recommend(None) == ([], None)
 
@@ -36,3 +35,21 @@ def test_sound_items_carry_what_the_panel_shows():
     action = next(a for a in sfx.silent_frames(data, seen) if a["frame"] == "f2.jpg")
     assert action["recs"] == [] and action["proposed"] == sfx.NONE
     assert {"fire", "wind"} <= set(sfx.CATEGORIES)
+
+
+def test_the_video_takes_the_proposal_until_you_choose():
+    data = {"frames": [
+        {"file": "f1.jpg", "crop": [0, 0, 10, 10], "bubbles": []},
+        {"file": "f2.jpg", "crop": [0, 10, 10, 10], "bubbles": [], "action_sound": {"chosen": "none"}},
+    ]}
+    seen = {"f1.jpg": {"cats": {"fire": 0.6}}, "f2.jpg": {"cats": {"door": 0.8}}}
+    assert sfx.frame_sounds(data, seen) == {}  # sans [auto] : seulement tes choix
+    auto = sfx.frame_sounds(data, seen, auto=True)
+    assert list(auto) == ["f1.jpg"] and "fire" in auto["f1.jpg"][0].replace("\\", "/")  # « aucun son » choisi : respecté
+
+
+def test_drawn_english_sound_effects_are_recognised():
+    assert [sfx.onomatopoeia(t) for t in ("BAM!", "WHOOOOSH", "CLANG CLANG", "THUD...", "LA", "9F", "")] == \
+        ["punch", "whoosh", "metal", "impact", None, None, None]
+    data = {"frames": [{"file": "f1.jpg", "crop": [0, 0, 10, 10], "bubbles": [{"text": "SHIIING", "kind": "sfx", "box": [0, 0, 5, 5]}]}]}
+    assert sfx.spots(data, {"f1.jpg": {"cats": {"punch": 0.7}}})[0]["recs"][:2] == ["slash", "punch"]

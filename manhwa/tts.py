@@ -33,18 +33,20 @@ def ensure_voices(chapter, crew, cfg):
     """Donne une voix (automatique) aux personnages qui n'en ont pas. Renvoie True si changé."""
     from manhwa.cast import series_dir
     from manhwa.ingest.wiki import load_wiki
-    from manhwa.voices import auto_voice, gender_of, list_voices
+    from manhwa.voices import auto_voice, gender_of, list_voices, spread
 
     missing = [c for c in crew["characters"] if not c.get("voice") and not c.get("silent")]
     if not missing:
-        return False
+        return spread(crew["characters"])
     voices = list_voices()
     pages = {w["id"]: w for w in (load_wiki(series_dir(chapter)) or {}).get("characters", [])}
     used = {c["voice"]["name"] for c in crew["characters"] if c.get("voice")}
     narrator = narrator_voice(cfg, crew)["name"]
     for c in missing:
-        c["voice"] = auto_voice(gender_of(pages.get(c.get("wiki"))), used, narrator, voices)
+        page = pages.get(c.get("wiki"))
+        c["voice"] = auto_voice(gender_of(page), used, narrator, voices, page=page, rank=len(used))
         used.add(c["voice"]["name"])
+    spread(crew["characters"])
     return True
 
 

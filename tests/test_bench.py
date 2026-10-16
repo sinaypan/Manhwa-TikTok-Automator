@@ -52,9 +52,11 @@ def test_freeze_then_score_every_step(chapter):
 
     report = bench.run_bench(ch)
     k = report["kinds"]
-    assert (k["erreurs"], k["erreurs qui s'entendent"]) == (1, 1)  # le charabia aurait été lu
+    assert (k["erreurs"], k["bulles"]) == (0, 3)  # le charabia est repéré (textfix), pas lu
+    raw, _ = bench.score_kinds(ch.load(), bench.load_gold(ch), predict=lambda frame, b: b["kind"])
+    assert (raw["erreurs"], raw["erreurs qui s'entendent"]) == (1, 1)  # les seules règles de lecture le liraient
     t = report["text"]
-    assert (t["répliques"], t["à corriger"], t["corrigées"], t["abîmées"]) == (2, 1, 0, 0)
+    assert (t["répliques"], t["à corriger"], t["corrigées"], t["abîmées"]) == (2, 1, 1, 0)  # « IDON'T » recollé
     s = report["speakers"]
     assert s["répliques"] == 2 and s["justes"] == 1.0  # chaque bulle à côté du bon visage
     f = report["faces"]

@@ -203,3 +203,17 @@ def test_secondary_characters_and_extras(chapter):
     c = api.put("/api/cast/extra", params={"id": cid}, json={"extra": "extra_m", "voice": {"name": "en-US-GuyNeural"}}).json()
     assert c["extras"]["extra_m"]["voice"]["name"] == "en-US-GuyNeural"
     assert api.put("/api/cast/extra", params={"id": cid}, json={"extra": "x", "voice": {"name": "en-US-GuyNeural"}}).status_code == 422
+
+
+def test_automatic_voices_differ_by_accent_pitch_and_age():
+    many = VOICES + [{"name": "en-GB-RyanNeural", "gender": "Male", "locale": "en-GB", "traits": "Bright"}]
+    a = voices.auto_voice("Male", set(), "en-US-ChristopherNeural", many, rank=0)
+    b = voices.auto_voice("Male", {a["name"]}, "en-US-ChristopherNeural", many, rank=1)
+    assert a["name"][:5] != b["name"][:5] and a["pitch"] != b["pitch"]  # autre accent, autre hauteur
+    old = voices.auto_voice("Male", set(), "x", many, page={"hair": "Silver-white"})
+    assert (old["pitch"], old["rate"]) == ("-10Hz", "-8%")
+    assert voices.is_old({"personality": "The old master of the sect."}) and not voices.is_old({"hair": "Black"})
+    crew = [{"voice": {"name": "v", "pitch": "+0Hz"}}, {"voice": {"name": "v", "pitch": "+2Hz"}},
+            {"voice": {"name": "v", "pitch": "+0Hz", "by": "user"}, "voice_ok": True}, {"voice": {"name": "w", "pitch": "+0Hz"}}]
+    assert voices.spread(crew)
+    assert [c["voice"]["pitch"] for c in crew] == ["+0Hz", "+8Hz", "+0Hz", "+0Hz"]  # ton choix n'est pas touché

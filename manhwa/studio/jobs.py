@@ -15,11 +15,12 @@ STEP_LABELS = {"frames": "Frames", "ocr": "Lecture du texte", "tts": "Voix", "re
                "faces": "Recherche des visages", "wiki": "Lecture du wiki", "wiki_images": "Images du wiki",
                "wiki_faces": "Visages du wiki", "review": "Relecture GPT", "voices": "Choix des voix",
                "sounds": "Sons des cases sans texte", "scene": "Ce que montrent les cases",
+               "textfix": "Correction du texte", "listen": "Réécoute de la voix",
                "download": "Téléchargement"}
 # ce que l'on compte à chaque étape (« 6 210 / 12 960 images »)
 STEP_UNITS = {"frames": "frames", "ocr": "frames lues", "tts": "voix", "render": "images", "faces": "frames", "wiki": "",
               "wiki_images": "images", "wiki_faces": "images", "review": "lots", "voices": "", "sounds": "",
-              "scene": "cases", "download": ""}
+              "scene": "cases", "textfix": "", "listen": "répliques", "download": ""}
 IMPORT_ID = "import"  # l'import n'a pas encore de chapitre : il a sa propre ligne
 
 
@@ -66,6 +67,8 @@ class Jobs:
         from manhwa.render import run_render
         from manhwa.review import run_review
         from manhwa.scene import run_scene
+        from manhwa.listen import run_listen
+        from manhwa.textfix import run_textfix
         from manhwa.sfx import suggest_actions
         from manhwa.tts import run_tts
         from manhwa.voices import propose as propose_voices
@@ -80,14 +83,17 @@ class Jobs:
             "voices": lambda c, p: propose_voices(c, cfg, progress=p),
             "sounds": lambda c, p: suggest_actions(c, cfg, progress=p),
             "scene": lambda c, p: run_scene(c, cfg, progress=p),
+            "textfix": lambda c, p: run_textfix(c, cfg, progress=p),
+            "listen": lambda c, p: run_listen(c, cfg, progress=p),
             "tts": lambda c, p: run_tts(c, cfg, progress=p),
             "render": lambda c, p: run_render(c, cfg, progress=p),
             "wiki_images": lambda c, p: wiki.fetch_images(series_dir(c), progress=p),
             "wiki_faces": lambda c, p: wiki.embed_wiki_faces(series_dir(c), progress=p),
         }
         plans = {
-            "make": ["frames", "ocr", "tts", "render"],
-            "auto": ["frames", "ocr", "faces", "scene?", "wiki?", "review?", "voices?", "sounds?", "tts", "render"],
+            "make": ["frames", "ocr", "textfix", "tts", "render", "listen?"],
+            "auto": ["frames", "ocr", "textfix", "faces", "scene?", "wiki?", "review?", "voices?", "sounds?", "tts", "render",
+                     "listen?"],
             "wiki_images": ["wiki_images", "wiki_faces"],
         }
         if kind == "import":

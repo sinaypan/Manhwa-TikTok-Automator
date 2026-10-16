@@ -11,6 +11,7 @@ le Studio (onglet Sons) ; sans choix, la catégorie proposée par GPT (relecture
 import hashlib
 import io
 import os
+import re
 import zipfile
 
 import numpy as np
@@ -205,6 +206,42 @@ def labels():
 
 # ---------- Le son de chaque SFX du chapitre ----------
 
+# onomatopées anglaises → catégorie (lettres répétées ramenées à une : « WHOOOOSH » = « WHOSH »)
+ONOMATOPOEIA = {
+    "punch": ["BAM", "POW", "WHAM", "SMACK", "WHACK", "THWACK", "PUNCH", "BAMF"],
+    "impact": ["THUD", "THUMP", "DOOM", "DUNK", "BONK", "THONK", "KADUNK"],
+    "slash": ["SLASH", "SHING", "SHINK", "SCHING", "SHLICK", "SHRING", "SCHWING", "SLICE", "CHOP"],
+    "whoosh": ["WHOSH", "SWOSH", "FWOSH", "WOSH", "SWISH", "FWIP", "ZIP", "ZOM", "SWIP"],
+    "explosion": ["BOM", "KABOM", "BLAM", "KRAKOM", "BLAST"],
+    "glass": ["CRASH", "SHATER", "CRISH", "TINKLE"],
+    "door": ["KNOCK", "CREAK", "SLAM", "CLICK"],
+    "footsteps": ["STEP", "STOMP", "TAP", "TAK", "CLOP", "SHUFLE"],
+    "metal": ["CLANG", "CLANK", "TING", "KANG", "CHING", "KLANG", "CLASH"],
+    "heartbeat": ["BADUMP", "BADUM", "BUMP", "DOKI"],
+    "thunder": ["RUMBLE", "KRAKA", "CRAKA"],
+    "fire": ["FWOM", "CRACKLE", "WHOMP"],
+    "wind": ["WHO", "FWO", "SWO"],
+    "cloth": ["FLAP", "FLUTER", "RUSTLE", "SWISH"],
+    "magic": ["WHIR", "HUM", "VWOM", "ZING"],
+}
+
+
+def _squeeze(word):
+    return re.sub(r"(.)\1+", r"\1", re.sub(r"[^A-Z]", "", word.upper()))
+
+
+_ONOMATOPOEIA = {_squeeze(w): cat for cat, ws in ONOMATOPOEIA.items() for w in ws}
+
+
+def onomatopoeia(text):
+    """La catégorie d'un bruitage dessiné lisible (« BAM! » → punch), sinon None."""
+    for token in (text or "").split():
+        w = _squeeze(token)
+        if len(w) >= 3 and w in _ONOMATOPOEIA:
+            return _ONOMATOPOEIA[w]
+    return None
+
+
 def _with_scene(item, scene, gpt):
     """Ajoute « je vois » (seen), les sons proposés (recs) et celui à mettre d'office (proposed)."""
     from manhwa.scene import recommend
@@ -233,7 +270,7 @@ def spots(data, scene=None):
                 "key": f"{frame['file']}#{b['index']}", "frame": frame["file"], "text": b["orig"], "box": b["box"],
                 "crop": frame["crop"], "chosen": b["orig"] in chosen,
                 "sound": chosen.get(b["orig"], suggested or NONE), "suggested": suggested, "gpt": gpt,
-            }, scene, gpt if gpt in CATEGORIES else None))
+            }, scene, gpt if gpt in CATEGORIES else onomatopoeia(b["orig"])))
     return out
 
 
@@ -263,20 +300,28 @@ def set_sounds(data, choices):
     return n
 
 
-def frame_sounds(data):
-    """{fichier de frame: [chemin du son, ...]} pour le rendu (bulles SFX, puis cases sans texte)."""
+def frame_sounds(data, scene=None, auto=False):
+    """{fichier de frame: [chemin du son, ...]} pour le rendu (bulles SFX, puis cases sans texte).
+
+    auto : une case où tu n'as rien choisi prend le son proposé (scene : ce que montrent les cases).
+    """
     out = {}
-    for s in silent_frames(data):
-        if s["sound"] != NONE:
-            path = pick(s["sound"], s["frame"])
-            if path:
-                out.setdefault(s["frame"], []).append(str(path))
-    for s in spots(data):
-        if s["sound"] != NONE:
-            path = pick(s["sound"], s["text"])
-            if path:
-                out.setdefault(s["frame"], []).append(str(path))
+    for items, seed in ((silent_frames(data, scene), "frame"), (spots(data, scene), "text")):
+        for s in items:
+            sound = s["proposed"] if auto and not s["chosen"] else s["sound"]
+            if sound != NONE:
+                path = pick(sound, s[seed])
+                if path:
+                    out.setdefault(s["frame"], []).append(str(path))
     return out
+
+
+def video_sounds(chapter, data, cfg):
+    """Les sons de la vidéo : tes choix, et la proposition ailleurs si [auto] sounds est activé."""
+    from manhwa.scene import load_scene
+
+    auto = bool((cfg.get("auto") or {}).get("sounds", True))
+    return frame_sounds(data, load_scene(chapter) if auto else None, auto)
 
 
 # ---------- Cases sans texte (action, décor) ----------

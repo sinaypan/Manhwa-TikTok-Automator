@@ -6,9 +6,13 @@ const STEP_NAMES = ['Pages', 'Découpe', 'Texte', 'Voix', 'Vidéo'];
 const JOB_STEPS = [
   ['frames', 'Frames 9:16'],
   ['ocr', 'Lecture du texte'],
+  ['textfix', 'Correction du texte'],
   ['tts', 'Voix'],
   ['render', 'Rendu vidéo'],
+  ['listen', 'Réécoute de la voix'],
 ];
+// étape d'un travail → case de la barre d'avancement (Pages, Découpe, Texte, Voix, Vidéo)
+const STEP_BAR = { frames: 1, ocr: 2, textfix: 2, faces: 2, scene: 2, wiki: 2, review: 2, voices: 2, sounds: 2, tts: 3, render: 4, listen: 4 };
 const KIND_STEPS = {
   faces: [['faces', 'Recherche des visages']],
   wiki: [['wiki', 'Lecture du wiki']],
@@ -20,18 +24,23 @@ const KIND_STEPS = {
 KIND_STEPS.review = [['review', 'Relecture GPT']];
 KIND_STEPS.voices = [['voices', 'Choix des voix']];
 KIND_STEPS.sounds = [['sounds', 'Sons des cases sans texte']];
+KIND_STEPS.scene = [['scene', 'Ce que montrent les cases']];
 const AUTO_STEPS = [
   ['frames', 'Frames 9:16'],
   ['ocr', 'Lecture du texte'],
+  ['textfix', 'Correction du texte'],
   ['faces', 'Visages'],
+  ['scene', 'Ce que montrent les cases'],
   ['wiki', 'Wiki'],
   ['review', 'Relecture GPT'],
   ['voices', 'Choix des voix'],
   ['sounds', 'Sons'],
   ['tts', 'Voix'],
   ['render', 'Rendu vidéo'],
+  ['listen', 'Réécoute de la voix'],
 ];
-const KIND_TITLES = { auto: 'Tout faire', faces: 'Recherche des personnages', wiki: 'Lecture du wiki', wiki_images: 'Images du wiki', review: 'Relecture par GPT', voices: 'Choix des voix par GPT', sounds: 'Sons proposés par GPT' };
+KIND_STEPS.listen = [['listen', 'Réécoute de la voix']];
+const KIND_TITLES = { auto: 'Tout faire', faces: 'Recherche des personnages', wiki: 'Lecture du wiki', wiki_images: 'Images du wiki', review: 'Relecture par GPT', voices: 'Choix des voix par GPT', sounds: 'Sons proposés par GPT', scene: 'Ce que montrent les cases' };
 const SCREENS = [
   ['cut', 'Découpe'],
   ['cast', 'Personnages'],
@@ -226,7 +235,7 @@ function renderLibrary() {
 function jobProgressIndex(job) {
   // étape du travail en cours → case de la barre (frames = découpe, ocr = texte…)
   if (KIND_STEPS[job.kind]) return -1; // personnages et wiki ne font pas partie des 5 étapes
-  return JOB_STEPS.findIndex(([step]) => step === job.step) + 1;
+  return STEP_BAR[job.step] ?? 0;
 }
 
 function episodeRow(c) {
@@ -1819,7 +1828,7 @@ async function setEmotion(l, emotion) {
 /* ---------- Écran Relecture (propositions de GPT) ---------- */
 
 const FIELD_TITLES = {
-  text: ['Texte corrigé', 'Erreurs de lecture corrigées par GPT. La version acceptée est celle que la voix lira.'],
+  text: ['Texte corrigé', 'Erreur de lecture corrigée (par GPT, ou en local : mots collés, lettre perdue). La version acceptée est celle que la voix lira.'],
   kind: ['Type de bulle', 'Réplique, pensée, narration, bruitage… La narration est lue par le narrateur ; un bruitage n’est pas lu.'],
   speaker: ['Qui parle', 'Le personnage que GPT pense entendre, d’après la scène et les visages autour.'],
 };
@@ -1944,6 +1953,7 @@ function reviewFocus(item, left) {
     { class: 'card review-focus', 'data-key': id },
     el('div', { class: 'focus-head' },
       el('span', { class: 'chip', text: title }),
+      el('span', { class: `chip source ${item.by}`, text: { local: 'Correction locale', gpt: 'GPT', mine: 'Ta version' }[item.by] || 'GPT' }),
       el('span', { class: 'muted grow', text: `${plural(left, 'proposition', 'propositions')} à décider` }),
       el('button', { type: 'button', class: 'link quiet', onclick: () => decide(pending, 'accepted') }, `Tout accepter (${pending.length})`)),
     el('div', { class: 'focus-body' },
@@ -2242,7 +2252,7 @@ function soundsSection() {
       el('div', { class: 'grow' },
         el('h3', { text: `À sonoriser · ${queue.length}` }),
         el('p', { class: 'muted', text: s.scene_done
-          ? 'Pour chaque bruitage dessiné et chaque case sans texte, je regarde l’image et je propose 3 sons (« je vois : du feu »). Clique sur un son : il se joue et il est choisi. La case se range en bas au bout de 3 secondes.'
+          ? 'Pour chaque bruitage dessiné et chaque case sans texte, je regarde l’image et je propose 3 sons (« je vois : du feu »). Le son en pointillés est déjà dans la vidéo tant que tu ne choisis pas. Clique sur un son : il se joue et il est choisi ; la case se range en bas au bout de 3 secondes.'
           : 'Je regarde d’abord ce que montrent les cases pour te proposer les bons sons…' })),
       el('div', { class: 'actions' },
         s.gpt.configured ? el('button', { type: 'button', class: 'pill', disabled: busy, title: 'GPT lit les répliques autour des cases sans texte et propose un son', onclick: suggestSounds }, icon('sparkles'), 'Demander aussi à GPT') : null,
@@ -2403,12 +2413,37 @@ function renderVideo() {
       el('div', { class: 'video-frame' }, player),
       el('div', { class: 'video-side' },
         el('div', { class: 'card', id: 'now' }),
+        el('div', { class: 'card', id: 'checks' }),
         el('div', { class: 'card', id: 'flags' }))),
   );
   if (!v.timeline.length) {
     $('#now').replaceChildren(el('p', { class: 'muted', text: 'Recrée la vidéo une fois pour pouvoir signaler un passage précis (la nouvelle vidéo garde l’emplacement de chaque case).' }));
   } else renderNow(0, true);
+  renderChecks();
   renderFlags();
+}
+
+function renderChecks() {
+  // ce que le Studio a trouvé seul : voix qui ne dit pas le texte, voix manquante, case trop courte ou trop longue
+  const v = state.videoInfo;
+  const card = $('#checks');
+  if (!card) return;
+  const where = { short: 'cut', long: 'cut', missing: 'cast', heard: 'review' };
+  const go = (c) => {
+    state.focusFrame = c.frame;
+    switchScreen(where[c.kind] || 'cast');
+  };
+  fill(card,
+    el('h3', { text: v.checks.length ? `Contrôle automatique · ${v.checks.length} à revoir` : 'Contrôle automatique' }),
+    v.checks.length
+      ? el('div', { class: 'flag-list' },
+          v.checks.map((c) =>
+            el('div', { class: 'flag' },
+              el('button', { type: 'button', class: 'link', title: 'Revoir ce passage', onclick: () => seek(c.t) }, fmtTime(c.t)),
+              el('span', { class: 'grow', text: c.text }),
+              el('button', { type: 'button', class: 'chip-btn plain', onclick: () => go(c) }, 'Corriger'))))
+      : el('p', { class: 'muted', text: v.listened ? 'Rien à signaler : chaque réplique a été réécoutée et la voix dit bien ce qui est écrit.' : 'La voix sera réécoutée (Whisper, en local) à la prochaine création de la vidéo.' }),
+  );
 }
 
 let nowFrame = null;

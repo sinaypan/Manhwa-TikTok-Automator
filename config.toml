@@ -43,6 +43,10 @@ music_duck = 0.4          # sous les voix, la musique descend à 40 % de ce volu
 transition = "slide"      # passage d'une frame à l'autre : "slide" (défilement), "fade" ou "none"
 transition_seconds = 0.3
 
+[auto]
+# Ce que la machine décide seule quand tu n'as rien choisi (tu peux toujours changer après).
+sounds = true             # chaque case prend le son proposé d'après l'image (onglet Sons)
+
 [scraper]
 headless = false           # false : la fenêtre s'affiche (nécessaire pour passer Cloudflare à la main)
 workers = 5

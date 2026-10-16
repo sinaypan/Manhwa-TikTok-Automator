@@ -89,15 +89,71 @@ def gender_of(page):
     return "Female" if g.startswith("f") else "Male" if g.startswith("m") else None
 
 
-def auto_voice(gender, used, narrator, voices):
-    """Une voix du bon genre, pas encore prise, différente de celle du narrateur."""
+PITCH_STEPS = (0, -6, 6, -10, 4, -3, 9)  # Hz : deux personnages ne parlent jamais à la même hauteur
+OLD_WORDS = re.compile(r"\b(old|elder|elderly|aged|grand(father|mother|pa|ma)|ancestor|master|patriarch)\b", re.I)
+GREY_HAIR = ("white", "grey", "gray", "silver")
+
+
+def is_old(page):
+    """Un personnage âgé d'après le wiki : cheveux blancs ou gris, ou « old », « master »…"""
+    p = page or {}
+    hair = f"{p.get('hair') or ''} {p.get('hair_key') or ''}".lower()
+    return any(g in hair for g in GREY_HAIR) or bool(OLD_WORDS.search(p.get("personality") or ""))
+
+
+def _by_accent(pool, voices):
+    """Les voix rangées en alternant les accents (US, UK, Australie…) : deux voisins ne se ressemblent pas."""
+    locale = {v["name"]: v.get("locale") or v["name"][:5] for v in voices}
+    groups = {}
+    for name in pool:
+        groups.setdefault(locale.get(name, name[:5]), []).append(name)
+    out = []
+    while any(groups.values()):
+        for names in groups.values():
+            if names:
+                out.append(names.pop(0))
+    return out
+
+
+def auto_voice(gender, used, narrator, voices, page=None, rank=0):
+    """Une voix du bon genre, pas encore prise, différente de celle du narrateur.
+
+    rank : combien de personnages ont déjà reçu une voix (la hauteur change à chaque fois) ;
+    page : la fiche du wiki (un personnage âgé parle plus grave et plus lentement).
+    """
     names = {v["name"] for v in voices}
     pool = [n for n in PREFERRED.get(gender or "Male", PREFERRED["Male"]) if n in names]
     pool += [v["name"] for v in voices if v["gender"] == (gender or "Male") and v["name"] not in pool]
+    pool = _by_accent(pool, voices)
+    old = is_old(page)
+    pitch = -10 if old else PITCH_STEPS[rank % len(PITCH_STEPS)]
+    rate = "-8%" if old else "+0%"
+    why = "âgé (wiki) : plus grave et plus lent" if old else "même genre, voix libre, accent et hauteur différents"
     for name in pool:
         if name not in used and name != narrator:
-            return {"name": name, "pitch": "+0Hz", "rate": "+0%", "reason": "même genre, voix libre", "by": "auto"}
-    return {"name": pool[0] if pool else narrator, "pitch": "-4Hz", "rate": "+0%", "reason": "voix déjà prise : un peu plus grave", "by": "auto"}
+            return {"name": name, "pitch": f"{pitch:+d}Hz", "rate": rate, "reason": why, "by": "auto"}
+    return {"name": pool[rank % len(pool)] if pool else narrator, "pitch": f"{pitch - 4:+d}Hz", "rate": rate,
+            "reason": "voix déjà prise : hauteur décalée", "by": "auto"}
+
+
+def spread(characters, step=8):
+    """Deux personnages sur la même voix de base : au moins `step` Hz d'écart (sauf ce que tu as choisi)."""
+    taken = {}
+    changed = False
+    for c in characters:
+        v = c.get("voice")
+        if not v or c.get("silent"):
+            continue
+        pitches = taken.setdefault(v["name"], [])
+        p = _number(v.get("pitch"), 50)
+        if v.get("by") != "user" and not c.get("voice_ok") and any(abs(p - q) < step for q in pitches):
+            # la hauteur libre la plus proche de celle prévue
+            p = next(x for d in range(1, 60) for x in (p + d, p - d) if all(abs(x - q) >= step for q in pitches))
+            if f"{p:+d}Hz" != v.get("pitch"):
+                v["pitch"] = f"{p:+d}Hz"
+                changed = True
+        pitches.append(p)
+    return changed
 
 
 # ---------- Proposition par GPT ----------

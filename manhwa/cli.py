@@ -176,6 +176,7 @@ def cmd_make(args, cfg):
     from manhwa.panels import build_frames
     from manhwa.render import run_render
     from manhwa.slicer import run_slicer
+    from manhwa.textfix import run_textfix
     from manhwa.tts import run_tts
 
     def make(chapter):
@@ -190,6 +191,7 @@ def cmd_make(args, cfg):
                 return
         print("  [2/4] OCR")
         run_ocr(chapter, cfg)
+        run_textfix(chapter, cfg)
         print("  [3/4] Voix")
         run_tts(chapter, cfg)
         print("  [4/4] Vidéo")
