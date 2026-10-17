@@ -2604,3 +2604,34 @@ details.silent-block > summary .muted {
   font-size: 13px;
   resize: vertical;
 }
+
+/* Sons : les lieux et leur ambiance */
+.places-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.place-row {
+  display: grid;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--sep);
+}
+
+.place-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.place-line .grow {
+  flex: 1;
+  min-width: 180px;
+}
+
+.place-row .chip-btn > svg {
+  width: 12px;
+  height: 12px;
+}

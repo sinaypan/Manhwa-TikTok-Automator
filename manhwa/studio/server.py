@@ -594,7 +594,7 @@ def create_app(cfg):
             ready = True
         except Exception:
             ready = False
-        from manhwa import vision
+        from manhwa import places, vision
 
         music = music_file(cfg)
         seen = scene.load_scene(chapter)
@@ -604,6 +604,7 @@ def create_app(cfg):
                 "described": vision.describe_done(chapter, data),
                 "understood": any("ai" in v for v in seen.values()) if isinstance(seen, dict) else False,
                 "vision": vision.backend(cfg), "timeline": timeline, "video": chapter.video_path.is_file(),
+                "places": places.detail(chapter, data),
                 "gpt": llm.public_settings(), "none": sfx.NONE, "library": ready,
                 "music": Path(music).name if music else None, "ocr_done": any("bubbles" in f for f in data["frames"]),
                 "moods": bool(cfg["render"].get("music_moods", True)) and not (cfg["render"].get("music") or "").strip(),
@@ -654,6 +655,28 @@ def create_app(cfg):
             raise HTTPException(404, "Aucun son dans cette catégorie")
         kind = {".ogg": "audio/ogg", ".wav": "audio/wav", ".mp3": "audio/mpeg"}.get(path.suffix.lower(), "application/octet-stream")
         return FileResponse(path, media_type=kind, headers={"Cache-Control": "max-age=3600"})
+
+    @app.put("/api/places")
+    def places_set(id: str = Query(...), payload: dict = Body(...)):
+        """L'ambiance d'un lieu, choisie à la main (« none » : aucune)."""
+        from manhwa import places
+
+        chapter = chapter_of(id)
+        with lock_for(id):
+            try:
+                places.choose(chapter, int(payload.get("from") or 0), payload.get("ambience"))
+            except (ValueError, TypeError) as e:
+                raise HTTPException(422, str(e))
+        return sounds_detail(id)
+
+    @app.get("/api/ambience_sample")
+    def ambience_sample(name: str = Query(...)):
+        from manhwa.soundbank import ambience_file
+
+        path = ambience_file(name)
+        if not path:
+            raise HTTPException(404, "Ambiance inconnue")
+        return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "max-age=3600"})
 
     @app.get("/api/sounds/preview")
     def sounds_preview(id: str = Query(...), frame: str = Query(...), sound: str = Query("none"), seed: str = Query(""),

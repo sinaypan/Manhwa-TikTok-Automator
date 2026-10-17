@@ -17,6 +17,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import subprocess
 
 import numpy as np
@@ -110,7 +111,8 @@ def pick_ambiences(scenes):
         vecs = soundbank.embed_texts([f"{s['hear']}, ambience" for s in scenes])
         for s, v in zip(scenes, vecs):
             s["q"] = base64.b64encode(v.astype(np.float16).tobytes()).decode()
-            s["ambience"] = soundbank.best_ambience(v)
+            if not s.get("mine"):  # ton choix reste le tien
+                s["ambience"] = soundbank.best_ambience(v)
     finally:
         soundbank.close()
 
@@ -122,6 +124,49 @@ def refresh_ambiences(chapter):
         pick_ambiences(places["scenes"])
         places_path(chapter).write_text(json.dumps(places, ensure_ascii=False), encoding="utf-8")
     return len(places.get("scenes") or [])
+
+
+def ambience_label(src):
+    """« Forest_quiet_birds_and_wind_the_morning_120208_00.wav » → « Forest quiet birds and wind the morning »."""
+    name = re.sub(r"[_\-]+", " ", os.path.splitext(src)[0])
+    name = re.sub(r"\b\d[\d .]*\b", " ", name)
+    return " ".join(name.split())[:48] or src
+
+
+def detail(chapter, data):
+    """Les lieux pour le Studio : cases, ambiance (et 4 autres idées proches), à choisir à la main."""
+    from manhwa import soundbank
+
+    scenes = load_places(chapter).get("scenes") or []
+    bank = soundbank.ambience_bank()
+    label = {r["file"]: ambience_label(r["src"]) for r in bank["loops"]}
+    out = []
+    for k, s in enumerate(scenes):
+        end = scenes[k + 1]["from"] - 1 if k + 1 < len(scenes) else len(data["frames"])
+        ideas = []
+        if s.get("q") and bank["loops"]:
+            q = np.frombuffer(base64.b64decode(s["q"]), np.float16).astype(np.float32)
+            order = np.argsort(-(bank["vectors"] @ q))
+            ideas = [bank["loops"][i]["file"] for i in order if bank["loops"][i]["file"] != s.get("ambience")][:4]
+        out.append({"from": s["from"], "to": end, "place": s.get("place") or "", "space": s.get("space"),
+                    "ambience": s.get("ambience"), "label": label.get(s.get("ambience")) or None,
+                    "mine": bool(s.get("mine")), "ideas": [{"file": f, "label": label[f]} for f in ideas]})
+    return {"scenes": out, "all": [{"file": f, "label": l} for f, l in sorted(label.items(), key=lambda kv: kv[1])]}
+
+
+def choose(chapter, start, ambience):
+    """L'ambiance d'un lieu choisie à la main (« none » : pas d'ambiance)."""
+    from manhwa import soundbank
+
+    places = load_places(chapter)
+    scene = next((s for s in places.get("scenes") or [] if s["from"] == start), None)
+    if scene is None:
+        raise ValueError("Lieu inconnu")
+    if ambience not in ("none", None) and not soundbank.ambience_file(ambience):
+        raise ValueError("Ambiance inconnue")
+    scene["ambience"] = None if ambience == "none" else ambience
+    scene["mine"] = True
+    places_path(chapter).write_text(json.dumps(places, ensure_ascii=False), encoding="utf-8")
 
 
 def frame_places(chapter, data):

@@ -2566,9 +2566,56 @@ function renderSounds() {
         ? `Je peux regarder ce qui se passe dans chaque case (${s.vision === 'local' ? 'en local, ≈ 10 min pour un épisode' : 'avec GPT'}), puis choisir les sons d’après l’histoire : un coup contre un mur, une lame qu’on dégaine, du sang…`
         : 'Pour des sons choisis d’après ce qui se passe dans chaque case, colle la clé GPT (Réglages). En attendant : d’après ce que montre l’image.' }),
       s.gpt.configured ? el('button', { type: 'button', class: 'pill accent', onclick: suggestSounds }, icon('sparkles'), 'Comprendre les cases') : null));
-  parts.push(soundStrip(), soundStage(), musicCard(s));
+  parts.push(soundStrip(), soundStage(), placesCard(), musicCard(s));
   box.replaceChildren(...parts);
   $('#sound-strip .on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+
+function placesCard() {
+  // les lieux de l'épisode et leur ambiance de fond : ▶ pour écouter, un clic pour en changer
+  const s = state.sounds;
+  const scenes = s.places?.scenes || [];
+  if (!scenes.length) return null;
+  return el(
+    'div',
+    { class: 'card places-card' },
+    el('div', { class: 'focus-head' },
+      el('b', { text: 'Les lieux et leur ambiance' }),
+      el('span', { class: 'muted grow', text: 'Le fond sonore de chaque lieu, très bas sous les voix. Clique sur une ambiance pour en choisir une autre.' })),
+    scenes.map((p) => {
+      const open = state.placeOpen === p.from;
+      return el('div', { class: `place-row${open ? ' open' : ''}` },
+        el('div', { class: 'place-line' },
+          el('div', { class: 'grow' },
+            el('b', { text: p.place || 'Lieu' }),
+            el('span', { class: 'muted', text: ` · cases ${p.from}${p.to > p.from ? ` à ${p.to}` : ''}${p.mine ? ' · ton choix' : ''}` })),
+          p.ambience
+            ? el('button', { type: 'button', class: 'chip-btn plain', title: 'Écouter cette ambiance', onclick: (e) => playUrl(e.currentTarget, `/api/ambience_sample?name=${enc(p.ambience)}`) }, icon('play'), p.label)
+            : el('span', { class: 'muted', text: 'Aucune ambiance' }),
+          el('button', { type: 'button', class: 'link quiet', onclick: () => { state.placeOpen = open ? null : p.from; renderSounds(); } }, open ? 'Fermer' : 'Changer')),
+        open
+          ? el('div', { class: 'who-chips' },
+              p.ideas.map((x) => el('span', { class: 'chip-pair' },
+                el('button', { type: 'button', class: 'chip-btn plain', title: 'Écouter', onclick: (e) => playUrl(e.currentTarget, `/api/ambience_sample?name=${enc(x.file)}`) }, icon('play')),
+                el('button', { type: 'button', class: 'chip-btn plain', title: 'Choisir cette ambiance', onclick: () => setPlace(p.from, x.file) }, x.label))),
+              el('select', { class: 'chip-btn', 'aria-label': 'Toutes les ambiances', onchange: (e) => e.target.value && setPlace(p.from, e.target.value) },
+                el('option', { value: '', text: 'Toutes les ambiances…' }),
+                (s.places.all || []).map((x) => el('option', { value: x.file, text: x.label }))),
+              el('button', { type: 'button', class: 'chip-btn plain', onclick: () => setPlace(p.from, 'none') }, 'Aucune ambiance'))
+          : null);
+    }),
+  );
+}
+
+async function setPlace(from, ambience) {
+  try {
+    state.sounds = await api(`/api/places?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify({ from, ambience }) });
+    state.placeOpen = null;
+    renderSounds();
+    toast('Ambiance changée : elle sera dans la vidéo à la prochaine mise à jour');
+  } catch (e) {
+    toast(`Non enregistré : ${e.message}`);
+  }
 }
 
 function musicCard(s) {
