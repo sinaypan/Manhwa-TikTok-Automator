@@ -16,13 +16,13 @@ STEP_LABELS = {"frames": "Frames", "ocr": "Lecture du texte", "tts": "Voix", "re
                "faces": "Recherche des visages", "wiki": "Lecture du wiki", "wiki_images": "Images du wiki",
                "wiki_faces": "Visages du wiki", "review": "Relecture GPT", "voices": "Choix des voix",
                "sounds": "Choix des sons (GPT)", "scene": "Ce que montrent les cases",
-               "describe": "Ce qui se passe dans les cases",
+               "describe": "Ce qui se passe dans les cases", "places": "Lieux et ambiances",
                "textfix": "Correction du texte", "listen": "Réécoute de la voix", "pilot": "Pilote automatique", "parts": "Découpe en parties",
                "download": "Téléchargement"}
 # ce que l'on compte à chaque étape (« 6 210 / 12 960 images »)
 STEP_UNITS = {"frames": "frames", "ocr": "frames lues", "tts": "voix", "render": "images", "faces": "frames", "wiki": "",
               "wiki_images": "images", "wiki_faces": "images", "review": "lots", "voices": "", "sounds": "",
-              "scene": "cases", "describe": "cases", "textfix": "", "listen": "répliques", "pilot": "", "parts": "parties", "download": ""}
+              "scene": "cases", "describe": "cases", "places": "", "textfix": "", "listen": "répliques", "pilot": "", "parts": "parties", "download": ""}
 IMPORT_ID = "import"  # l'import n'a pas encore de chapitre : il a sa propre ligne
 
 
@@ -74,6 +74,7 @@ class Jobs:
         from manhwa.pilot import run_pilot
         from manhwa.textfix import run_textfix
         from manhwa.sfx import suggest_sounds
+        from manhwa.places import run_places
         from manhwa.vision import run_describe
         from manhwa.tts import run_tts
         from manhwa.voices import propose as propose_voices
@@ -88,6 +89,7 @@ class Jobs:
             "voices": lambda c, p: propose_voices(c, cfg, progress=p),
             "sounds": lambda c, p: suggest_sounds(c, cfg, progress=p),
             "describe": lambda c, p: run_describe(c, cfg, progress=p),
+            "places": lambda c, p: run_places(c, cfg, progress=p),
             "scene": lambda c, p: run_scene(c, cfg, progress=p),
             "textfix": lambda c, p: run_textfix(c, cfg, progress=p),
             "listen": lambda c, p: run_listen(c, cfg, progress=p),
@@ -101,8 +103,8 @@ class Jobs:
         plans = {
             "make": ["frames", "ocr", "textfix", "tts", "render", "listen?"],
             "auto": ["frames", "ocr", "textfix", "faces", "scene?", "describe?", "wiki?", "review?", "voices?", "sounds?",
-                     "pilot?", "tts", "render", "listen?", "parts?"],
-            "understand": ["scene", "describe", "sounds"],
+                     "places?", "pilot?", "tts", "render", "listen?", "parts?"],
+            "understand": ["scene", "describe", "sounds", "places?"],
             "wiki_images": ["wiki_images", "wiki_faces"],
         }
         if kind == "import":

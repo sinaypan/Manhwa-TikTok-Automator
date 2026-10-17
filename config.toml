@@ -29,9 +29,10 @@ voice = "en-US-ChristopherNeural"   # ex : "fr-FR-HenriNeural", "en-US-AriaNeura
 rate = "+0%"                         # vitesse (+10% conseillé pour TikTok)
 volume = "+0%"
 concurrency = 4
+expressive = "all"   # "all" : toutes les voix jouent l'émotion (Chatterbox) ; "chosen" : seulement celles cochées
 
 [render]
-speed = 1.25              # rythme de la vidéo : voix 25 % plus rapide, blancs raccourcis d'autant
+speed = 1.1               # rythme de la vidéo : voix 10 % plus rapide, blancs raccourcis d'autant
 fps = 24
 padding_seconds = 0.2      # silence ajouté après chaque réplique
 silent_frame_seconds = 2.0 # durée d'une frame sans texte
@@ -45,6 +46,10 @@ transition = "slide"      # passage d'une frame à l'autre : "slide" (défilemen
 transition_seconds = 0.3
 effects = true            # l'image tremble sur un coup, flash sur un coup violent (d'après les sons)
 depth = true              # relief : pendant le zoom, le premier plan avance un peu plus que le fond
+ambience = true           # une ambiance de fond par lieu (prison, forêt, marché…), sous les voix
+ambience_volume = 0.22
+voice_space = true        # les voix prennent de la chaleur et résonnent comme le lieu
+loudness = -14            # niveau final du son (LUFS, comme TikTok) ; 0 = laisser tel quel
 captions = true           # sous-titres karaoké (le mot dit passe en jaune)
 captions_words = 4        # mots affichés ensemble
 captions_font = ""        # chemin d'une police .ttf ; vide = Impact (ou une autre police grasse de Windows)

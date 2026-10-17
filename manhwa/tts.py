@@ -128,12 +128,60 @@ def run_tts(chapter, cfg, force=False, progress=None):
     print(f"  Génération de {len(todo)} répliques...")
     try:
         asyncio.run(_run(chapter, list(todo.values()), cfg, progress))
+        _recheck_expressive(chapter, data, [s for s in todo.values() if s.get("expressive")])
     finally:
         from manhwa import chatterbox_tts
 
         chatterbox_tts.close()  # libère la carte graphique avant le rendu
     _remove_unused(chapter, data)
     return len(todo)
+
+
+def _recheck_expressive(chapter, data, segments, tries=2):
+    """Chatterbox se trompe parfois sur une réplique très courte (« YIKES! » dit « I kiss! ») : Whisper réécoute,
+    la réplique ratée est refaite (deux fois au plus), puis dite par la voix de base si elle reste fausse."""
+    if not segments:
+        return
+    from manhwa import chatterbox_tts
+    import difflib
+
+    from manhwa.listen import FLAG, flagged, pcm, transcribe, words
+    from manhwa.textfix import protected_words
+    from manhwa.voices import synthesize
+
+    names = protected_words(chapter, [b["text"] for f in data["frames"] for b in f.get("bubbles") or []])
+
+    def off(text, heard):
+        # une réplique longue : comme l'onglet Vidéo ; très courte, plus strict (« YIKES! » mal dite compte aussi)
+        if len(words(text)) > 2:
+            return flagged({"text": text, "heard": heard}, names)
+        a = [w.replace("'", "") for w in words(text) if w not in names]
+        b = [w.replace("'", "") for w in words(heard)]
+        same = sum(m.size for m in difflib.SequenceMatcher(None, a, b, autojunk=False).get_matching_blocks())
+        return bool(a) and 1 - same / len(a) >= FLAG
+
+    def wrong(batch):
+        heard = transcribe([pcm(chapter.root / s["audio"]) for s in batch])
+        return [s for s, h in zip(batch, heard) if off(s["text"], h)]
+
+    bad = wrong(segments)
+    for attempt in range(tries):
+        if not bad:
+            break
+        print(f"  Réécoute : {len(bad)} réplique(s) mal dite(s), essai {attempt + 2}")
+        for s in bad:
+            try:
+                chatterbox_tts.synthesize(s["text"], chapter.root / s["audio"], s)
+            except Exception:
+                pass
+        bad = wrong(bad)
+    for s in bad:  # toujours fausse : la voix de base, sans émotion, mais juste
+        plain = {k: v for k, v in s.items() if k not in ("expressive", "emotion")}
+        try:
+            asyncio.run(synthesize(s["text"], chapter.root / s["audio"], plain))
+            print(f"  [voix de base] {s['text'][:50]}")
+        except Exception as e:
+            print(f"  [!] {e}")
 
 
 def tts_up_to_date(chapter, data, cfg):

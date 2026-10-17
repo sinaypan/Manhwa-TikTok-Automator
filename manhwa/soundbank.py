@@ -5,7 +5,8 @@ et vidéos monétisées permis, sans crédit). La licence interdit deux choses :
 (ils restent dans .cache/, jamais commités) et s'en servir pour entraîner une IA (on ne fait que
 les écouter avec CLAP, sans rien entraîner).
 
-    python -m manhwa.soundbank          prépare la bibliothèque (une fois, ≈ 5 min)
+    python -m manhwa.soundbank              prépare la bibliothèque et les ambiances (une fois, ≈ 5 min)
+    python -m manhwa.soundbank --ambience   seulement les ambiances (places.py)
 
 1. Chaque fichier de .cache/sonniss/raw/ (et de sfx/<catégorie>/) est coupé en prises : un fichier
    pro contient souvent plusieurs coups séparés par des silences. Chaque prise (0,1 à 4 s) est mise
@@ -300,6 +301,103 @@ def best(category, query=None, seed=""):
     return bank_dir() / "takes" / b["takes"][rows[k]]["file"]
 
 
+
+
+# ---------- Ambiances : le fond sonore d'un lieu (places.py) ----------
+
+AMB_SECONDS = 25
+# ambiances hors sujet pour un fond (machines, véhicules, ville moderne, un son précis plutôt qu'un fond)
+AMB_SKIP = (r"chairlift|metro|barcelona|plane|iceberg|geese|apartment|children|house party|burger|beach|football|"
+            r"compressor|machine|mothership|gas burner|dry ice|jet ski|toyota|bmw|volvo|alfa|b-25|brdm|tugboat|"
+            r"screwdriver|nighthawk|hawk|falcon|drawer|nightstand|sink|encarta|loretta|tongues|orcs|audience|cannon|"
+            r"exhibition|designed|splashes|dive in|inside boat|plastic|ice on stream|swoosh")
+AMB_FADE = 1.5  # la fin se fond dans le début : la boucle ne s'entend pas
+
+
+def ambience_raw_dir():
+    return ROOT / ".cache" / "sonniss" / "ambience"
+
+
+def _loop(y):
+    """25 s d'ambiance qui bouclent sans couture, au même volume que les autres."""
+    y = y[: int(AMB_SECONDS * RATE)].astype(np.float32)
+    y = y - y.mean()
+    f = int(AMB_FADE * RATE)
+    if len(y) > 3 * f:
+        ramp = np.linspace(0, 1, f, dtype=np.float32)
+        head = y[:f].copy()
+        y = y[f:]
+        y[-f:] = y[-f:] * (1 - ramp) + head * ramp
+    rms = float(np.sqrt(np.mean(y ** 2))) or 1.0
+    return y * min(TARGET_RMS / rms, 0.95 / max(float(np.abs(y).max()), 1e-6))
+
+
+def prepare_ambience(progress=None):
+    """Les ambiances de .cache/sonniss/ambience/ : en boucles, écoutées par CLAP. Renvoie leur nombre."""
+    folder = bank_dir() / "ambience"
+    folder.mkdir(parents=True, exist_ok=True)
+    files = sorted(p for p in ambience_raw_dir().rglob("*") if p.suffix.lower() in (".wav", ".flac")) \
+        if ambience_raw_dir().is_dir() else []
+    rows = []
+    for i, src in enumerate(files):
+        if re.search(AMB_SKIP, src.name.lower()):
+            continue
+        try:
+            y = _decode(src)
+        except Exception:
+            continue
+        if len(y) < 8 * RATE:
+            continue
+        name = hashlib.sha1(src.name.encode()).hexdigest()[:16] + ".wav"
+        _write(folder / name, _loop(y))
+        rows.append({"file": name, "src": src.name, "pack": src.parent.name})
+        if progress:
+            progress(i + 1, 2 * len(files))
+    if not rows:
+        return 0
+    vecs = embed_audio([folder / r["file"] for r in rows])
+    np.save(bank_dir() / "ambience_vectors.npy", vecs.astype(np.float16))
+    (bank_dir() / "ambience.json").write_text(json.dumps({"version": BANK_VERSION, "loops": rows}, ensure_ascii=False),
+                                             encoding="utf-8")
+    close()
+    _AMB.clear()
+    return len(rows)
+
+
+_AMB = {}
+
+
+def ambience_bank():
+    if not _AMB:
+        try:
+            index = json.loads((bank_dir() / "ambience.json").read_text(encoding="utf-8"))
+            _AMB.update(loops=index["loops"], vectors=np.load(bank_dir() / "ambience_vectors.npy").astype(np.float32))
+        except (OSError, ValueError, KeyError):
+            _AMB.update(loops=[], vectors=np.zeros((0, 512), np.float32))
+    return _AMB
+
+
+def ambience_ready():
+    return bool(ambience_bank()["loops"])
+
+
+def best_ambience(query):
+    """Le nom de la boucle d'ambiance la plus proche de la phrase (vecteur CLAP), ou None."""
+    b = ambience_bank()
+    if not b["loops"]:
+        return None
+    return b["loops"][int(np.argmax(b["vectors"] @ np.asarray(query, np.float32)))]["file"]
+
+
+def ambience_file(name):
+    path = bank_dir() / "ambience" / name
+    return path if name and path.is_file() else None
+
+
 if __name__ == "__main__":
-    n = prepare(lambda d, t: print(f"{d}/{t}", end="\r", flush=True))
-    print(f"\n{n} prises rangées dans {bank_dir()}")
+    import sys
+
+    show = lambda d, t: print(f"{d}/{t}", end="\r", flush=True)  # noqa: E731
+    if "--ambience" not in sys.argv:
+        print(f"\n{prepare(show)} prises rangées dans {bank_dir()}")
+    print(f"\n{prepare_ambience(show)} ambiances prêtes")

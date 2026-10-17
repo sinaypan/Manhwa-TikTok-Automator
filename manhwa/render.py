@@ -8,6 +8,8 @@
     - les bruitages choisis (manhwa/sfx.py) partent au début de leur case, sous la voix ;
     - l'image réagit aux coups : elle tremble, un flash sur un coup violent (manhwa/motion.py) ;
     - relief : pendant le zoom, le premier plan avance un peu plus que le fond (motion.depth_map) ;
+    - le lieu (places.py) : une ambiance de fond sous chaque scène, et des voix qui résonnent comme le lieu ;
+    - à la fin, tout le son est remis au niveau des vidéos en ligne ([render] loudness, en LUFS) ;
     - une musique de fond (fichier dans music/ ou [render] music) tourne en boucle et
       baisse pendant que les personnages parlent.
 """
@@ -50,7 +52,11 @@ def render_key(chapter, data, cfg):
         parts.append([frame["file"], frame.get("crop"), stat and stat.st_size, stat and stat.st_mtime_ns, voices,
                       [[os.path.basename(s), g] for s, g in sounds.get(frame["file"], [])],
                       effects(hits.get(frame["file"], []))])
+    from manhwa.places import load_places
+
     music = music_file(cfg)
+    if cfg["render"].get("ambience", True) or cfg["render"].get("voice_space", True):
+        parts.append([[s.get("from"), s.get("space"), s.get("ambience")] for s in load_places(chapter).get("scenes") or []])
     mood = None
     if cfg["render"].get("music_moods", True) and not (cfg["render"].get("music") or "").strip():
         from manhwa import moods
@@ -60,6 +66,23 @@ def render_key(chapter, data, cfg):
         mood = ([moods.frame_mood(f, scene) for f in data["frames"]],
                 {m: os.path.getsize(p) for m, p in moods.tracks().items()})
     return fingerprint(parts, cfg["render"], cfg["output"], music and os.path.getsize(music), mood)
+
+
+def _loudness(video, target):
+    """Tout le son au niveau des vidéos en ligne (≈ -14 LUFS, comme TikTok) : l'image est recopiée telle quelle."""
+    import subprocess
+
+    import imageio_ffmpeg
+
+    out = str(video) + ".loud.mp4"
+    try:
+        subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-v", "quiet", "-y", "-i", str(video), "-c:v", "copy",
+                        "-af", f"loudnorm=I={target}:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k", out], check=True)
+        os.replace(out, video)
+    except Exception as e:  # le son d'avant reste
+        print(f"  [!] Niveau sonore non réglé ({e})")
+        if os.path.exists(out):
+            os.remove(out)
 
 
 def _load_audio(path):
@@ -282,6 +305,9 @@ def run_render(chapter, cfg, force=False, progress=None):
     if pan and any(f["crop"][3] / max(1, f["crop"][2]) > TALL for f in data["frames"]):
         strip, _ = load_strip(chapter.pages(), cfg["slicer"]["max_src_width"])
 
+    from manhwa import places as places_mod
+
+    where = places_mod.frame_places(chapter, data)
     clips, audios, opened, durations, voiced, files, spoken = [], [], [], [], [], [], []
     for i, frame in enumerate(data["frames"]):
         img_path = chapter.frames_dir / frame["file"]
@@ -290,7 +316,18 @@ def run_render(chapter, cfg, force=False, progress=None):
             print(f"  [!] Frame manquante ignorée : {frame['file']}")
             continue
         # les répliques de la frame l'une après l'autre (une voix par personnage), un court blanc entre deux
-        loaded = [(seg, _load_audio(chapter.root / seg["audio"])) for seg in frame.get("segments") or []]
+        space = (where[i] or {}).get("space") if r.get("voice_space", True) else None
+
+        def voice_file(seg):
+            path = chapter.root / seg["audio"]
+            if space and path.is_file():
+                try:
+                    return places_mod.voice_in_space(chapter, path, space)  # chaleur et résonance du lieu
+                except Exception:
+                    pass
+            return path
+
+        loaded = [(seg, _load_audio(voice_file(seg))) for seg in frame.get("segments") or []]
         loaded = [(seg, a) for seg, a in loaded if a]
         pieces = [a for _, a in loaded]
         t_in, said = 0.0, []  # où commence chaque réplique dans la frame (sous-titres)
@@ -358,7 +395,18 @@ def run_render(chapter, cfg, force=False, progress=None):
             music = _music_track(path, durations, voiced, r)
         if music is not None:
             opened.append(music)
-        layers = [a.with_start(t) for a, t in zip(audios, starts) if a is not None] + ([music] if music is not None else [])
+        ambience = None
+        if r.get("ambience", True):
+            from manhwa.soundbank import ambience_file
+
+            secs = places_mod.sections([w for w, f in zip(where, data["frames"]) if f["file"] in set(files)], durations)
+            paths = {a: str(ambience_file(a)) for a, _, _ in secs if ambience_file(a)}
+            secs = [s for s in secs if s[0] in paths]
+            if secs:
+                amb_r = {**r, "music_volume": float(r.get("ambience_volume", 0.22)), "music_duck": 0.6}
+                ambience = _mood_track(secs, paths, durations, voiced, amb_r, opened, fade=2.0)
+        layers = ([a.with_start(t) for a, t in zip(audios, starts) if a is not None] + ([music] if music is not None else [])
+                  + ([ambience] if ambience is not None else []))
         if r.get("captions", True):
             from manhwa.captions import burn, events
 
@@ -379,6 +427,8 @@ def run_render(chapter, cfg, force=False, progress=None):
                 c.close()
             except Exception:
                 pass
+    if r.get("loudness"):
+        _loudness(tmp, float(r["loudness"]))
     os.replace(tmp, chapter.video_path)
 
     data = chapter.load()  # relu : on a pu valider des choses dans le Studio pendant le rendu

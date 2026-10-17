@@ -29,6 +29,7 @@ INTENSITY = {"neutral": 0.5, "calm": 0.4, "happy": 0.6, "excited": 0.75, "mockin
              "whisper": 0.3, "thinking": 0.35}
 _WORKER = {}
 _LOCK = threading.Lock()
+_REF_LOCK = threading.Lock()  # deux répliques d'une même voix en même temps : une seule fabrique la référence
 
 
 def python():
@@ -55,8 +56,9 @@ def reference(params):
     folder = ROOT / ".cache" / "voices_ref"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{fingerprint(REF_TEXT, base)}.mp3"
-    if not path.is_file():
-        asyncio.run(synthesize(REF_TEXT, path, base))
+    with _REF_LOCK:
+        if not path.is_file():
+            asyncio.run(synthesize(REF_TEXT, path, base))
     return path
 
 

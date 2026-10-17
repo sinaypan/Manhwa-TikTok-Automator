@@ -226,10 +226,17 @@ def prosody(cfg, voice, emotion=None):
     volume = _number(cfg["tts"]["volume"], 100) + e_volume
     out = {"voice": voice["name"], "rate": f"{round((rate - 1) * 100):+d}%", "pitch": f"{pitch:+d}Hz",
            "volume": f"{max(-90, min(100, volume)):+d}%"}
-    if voice.get("expressive"):  # Chatterbox rejoue la voix avec l'émotion (chatterbox_tts.py)
+    if voice.get("expressive") or (cfg["tts"].get("expressive") == "all" and _chatterbox()):  # rejouée avec l'émotion
         out["expressive"] = True
         out["emotion"] = emotion or "neutral"
     return out
+
+
+def _chatterbox():
+    """Chatterbox installé (.venv-tts) : sans lui, « toutes expressives » garde les voix de base."""
+    from manhwa import chatterbox_tts
+
+    return chatterbox_tts.available()
 
 
 async def synthesize(text, path, params):
