@@ -323,7 +323,8 @@ def run_render(chapter, cfg, force=False, progress=None):
             depth = None
             if zoom > 0 and r.get("depth", True):
                 try:
-                    depth = motion.depth_map(rgb, motion.panel_rect(rgb, frame["crop"][2:4]))
+                    boxes = [b["box"] for b in frame.get("bubbles") or []]  # les bulles bougent d'un bloc
+                    depth = motion.depth_map(rgb, motion.panel_rect(rgb, frame["crop"][2:4]), boxes, frame["crop"][2])
                 except Exception as e:  # sans le modèle : le zoom simple
                     print(f"  [!] Relief indisponible ({e})")
                     r = {**r, "depth": False}
