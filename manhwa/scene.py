@@ -190,7 +190,7 @@ def run_scene(chapter, cfg, progress=None):
     return len(todo)
 
 
-def recommend(scene, gpt=None, ai=None, limit=3):
+def recommend(scene, gpt=None, ai=None, limit=3, memory=None):
     """Les sons à proposer pour une case : [catégorie], et celle à mettre d'office (ou None).
 
     scene : {"cats", "seen"} de la case ; gpt : la catégorie que GPT a proposée (s'il y en a) ;
@@ -204,6 +204,11 @@ def recommend(scene, gpt=None, ai=None, limit=3):
     cats.pop("none", None)
     ranked = [c for c, p in sorted(cats.items(), key=lambda kv: -kv[1]) if p >= PROPOSE]
     recs = ([gpt] if gpt else []) + [c for c in ranked if c != gpt]
+    if memory:  # appris de tes choix (sound_memory.py), seulement quand il fait mieux : il passe devant
+        first = memory["sound"]
+        extra = [c for c in (ai or {}).get("sounds") or [] if c != first][:1] if first != "none" else []
+        recs = ([first] if first != "none" else []) + extra + [c for c in recs if c not in (first, *extra)]
+        return recs[:limit + 1], ("+".join([first] + extra) if first != "none" else "none")
     if ai is not None:
         chosen = [c for c in ai.get("sounds") or [] if c]
         recs = chosen + [c for c in recs if c not in chosen]

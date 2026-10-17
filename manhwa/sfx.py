@@ -425,13 +425,16 @@ def _with_scene(item, scene, gpt):
 
     s = (scene or {}).get(item["frame"])
     ai = ((s or {}).get("ai") or {}).get(item["key"])
-    recs, best = recommend(s, gpt, ai)
+    memory = ((s or {}).get("memory") or {}).get(item["key"])
+    recs, best = recommend(s, gpt, ai, memory=memory)
     item["recs"] = recs
     item["proposed"] = best or NONE
     item["seen"] = list(((s or {}).get("seen") or {}).keys())[:3]
     item["what"] = (ai or {}).get("what") or None
     item["why"] = (ai or {}).get("why") or None
     item["strength"] = (ai or {}).get("strength") or None
+    if memory:
+        item["why"] = f"Comme tes choix sur des cases qui ressemblent ({round(100 * memory['share'])} %)"
     return item
 
 

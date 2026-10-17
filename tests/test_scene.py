@@ -118,3 +118,25 @@ def test_sonniss_picks_useful_sounds_and_ambiences_by_name():
     # une longue prise de vent sert aussi d'ambiance ; la ville et la prise trop courte, non
     assert [n.rsplit("/", 1)[-1] for _, n, _ in p["ambience"]] == ["Forest quiet birds morning.wav",
                                                                   "Wind, Ext, Gust, Grasslands.wav"]
+
+
+def test_sound_memory_votes_and_only_switches_on_when_it_does_better():
+    import numpy as np
+
+    from manhwa import sound_memory as sm
+
+    rng = np.random.default_rng(0)
+    fire, blood = rng.normal(size=8), rng.normal(size=8)
+    unit = lambda v: v / np.linalg.norm(v)  # noqa: E731
+    # deux sortes de cases : les cases « feu » ont eu du feu, les cases « sang » du sang
+    memory = [("ep1", 10 * k + j, unit((fire if k % 2 else blood) + 0.1 * rng.normal(size=8)), "fire" if k % 2 else "blood", False)
+              for k in range(12) for j in range(2)]
+    assert sm.vote(unit(fire), memory, False)[0] == "fire" and sm.vote(unit(blood), memory, False)[0] == "blood"
+    assert sm.vote(unit(fire), memory, True) == (None, 0.0)  # pas d'exemple de bulle
+    wrong = {(m[0], m[1], m[4]): "wind" for m in memory}  # l'ancienne proposition se trompe toujours
+    assert sm.measure(memory, wrong)[0] is not None
+    right = {(m[0], m[1], m[4]): m[3] for m in memory}  # elle a toujours raison : la mémoire n'apporte rien
+    assert sm.measure(memory, right)[0] is None
+    # dans la proposition : la mémoire passe devant, le 2e son de GPT reste
+    assert scene.recommend({"cats": {"wood": 0.5}}, ai={"sounds": ["impact", "blood"]}, memory={"sound": "slash", "share": 0.8}) \
+        == (["slash", "impact", "wood"], "slash+impact")

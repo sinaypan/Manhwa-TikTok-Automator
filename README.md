@@ -272,6 +272,11 @@ d'après l'histoire, la force du moment (le volume suit) et ce qu'on doit entend
 modèle qui écoute, prend dans la bibliothèque pro la prise la plus proche. Tes propres sons se
 rangent dans `sfx/<catégorie>/`.
 
+**Les sons appris de tes choix** : SigLIP 2 (local) compare chaque case à celles où tu as déjà
+choisi un son, dans tous tes épisodes. Avant chaque proposition, cette mémoire se teste sur tes
+choix (chaque case devinée par les autres) : elle ne sert que si elle fait mieux que la
+proposition habituelle. Avec un seul épisode, elle attend (46 % contre 83 % sur l'épisode 1).
+
 **Les lieux** : GPT coupe l'épisode en lieux (prison, marché, forêt…) ; chacun a une ambiance
 de fond, très basse, et les voix y résonnent comme dans le lieu. **L'image réagit** aux
 coups : zoom « punch », tremblement, flash ; pendant chaque case, la caméra glisse en relief

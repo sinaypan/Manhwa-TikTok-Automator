@@ -12,7 +12,7 @@ const JOB_STEPS = [
   ['listen', 'Réécoute de la voix'],
 ];
 // étape d'un travail → case de la barre d'avancement (Pages, Découpe, Texte, Voix, Vidéo)
-const STEP_BAR = { frames: 1, ocr: 2, textfix: 2, faces: 2, scene: 2, describe: 2, places: 2, wiki: 2, review: 2, voices: 2, sounds: 2, pilot: 2, tts: 3, render: 4, listen: 4, parts: 4 };
+const STEP_BAR = { frames: 1, ocr: 2, textfix: 2, faces: 2, scene: 2, describe: 2, places: 2, memory: 2, wiki: 2, review: 2, voices: 2, sounds: 2, pilot: 2, tts: 3, render: 4, listen: 4, parts: 4 };
 const KIND_STEPS = {
   faces: [['faces', 'Recherche des visages']],
   wiki: [['wiki', 'Lecture du wiki']],
@@ -28,6 +28,7 @@ KIND_STEPS.understand = [
   ['scene', 'Ce que montrent les cases'],
   ['describe', 'Ce qui se passe dans les cases'],
   ['sounds', 'Choix des sons (GPT)'],
+  ['memory', 'Sons appris de tes choix'],
   ['places', 'Lieux et ambiances'],
 ];
 KIND_STEPS.scene = [['scene', 'Ce que montrent les cases']];
@@ -42,6 +43,7 @@ const AUTO_STEPS = [
   ['review', 'Relecture GPT'],
   ['voices', 'Choix des voix'],
   ['sounds', 'Sons'],
+  ['memory', 'Sons appris de tes choix'],
   ['places', 'Lieux et ambiances'],
   ['pilot', 'Pilote automatique'],
   ['tts', 'Voix'],
