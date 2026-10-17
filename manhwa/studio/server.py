@@ -778,7 +778,11 @@ def create_app(cfg):
         base = str(payload.get("base") or "").strip()
         if base and not base.startswith(("http://", "https://")):
             raise HTTPException(422, "L'adresse doit commencer par https://")
-        llm.save_settings(base=base or None, model=str(payload.get("model") or "").strip() or None, key=key or None)
+        claude = str(payload.get("claude_key") or "").strip()
+        if claude and (len(claude) > 400 or any(ch.isspace() for ch in claude)):
+            raise HTTPException(422, "Clé Claude illisible")
+        llm.save_settings(base=base or None, model=str(payload.get("model") or "").strip() or None, key=key or None,
+                          claude_key=claude or None)
         return {"gpt": llm.public_settings()}
 
     @app.post("/api/settings/gpt/test")

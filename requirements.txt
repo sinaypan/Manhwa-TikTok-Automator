@@ -1,5 +1,6 @@
 playwright
 requests
+anthropic        # Claude, en secours de GPT (llm.py)
 urllib3
 opencv-python
 numpy

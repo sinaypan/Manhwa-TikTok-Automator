@@ -2436,12 +2436,14 @@ async function openSettings() {
   const status = el('p', { class: 'muted', text: s.configured ? `Clé enregistrée : ${s.key_hint}` : 'Aucune clé enregistrée.' });
   const base = el('input', { class: 'field', value: s.base, placeholder: 'https://…/v1', spellcheck: 'false' });
   const model = el('input', { class: 'field', value: s.model, placeholder: 'gpt-4.1', spellcheck: 'false' });
-  const key = el('input', { class: 'field', type: 'password', placeholder: s.configured ? 'Nouvelle clé (laisser vide pour garder l’actuelle)' : 'Colle ta clé ici', autocomplete: 'off', spellcheck: 'false' });
+  const key = el('input', { class: 'field', type: 'password', placeholder: s.gpt_configured ? 'Nouvelle clé (laisser vide pour garder l’actuelle)' : 'Colle ta clé ici', autocomplete: 'off', spellcheck: 'false' });
+  const claude = el('input', { class: 'field', type: 'password', placeholder: s.claude?.configured ? `Enregistrée : ${s.claude.key_hint} (laisser vide pour la garder)` : 'Clé Anthropic (sk-ant-…), facultative', autocomplete: 'off', spellcheck: 'false' });
   const close = () => $('#settings')?.remove();
   const save = async () => {
     try {
-      const res = await api('/api/settings/gpt', { method: 'PUT', body: JSON.stringify({ base: base.value, model: model.value, key: key.value }) });
+      const res = await api('/api/settings/gpt', { method: 'PUT', body: JSON.stringify({ base: base.value, model: model.value, key: key.value, claude_key: claude.value }) });
       key.value = '';
+      claude.value = '';
       status.textContent = `Enregistré : ${res.gpt.key_hint}. Test…`;
       await api('/api/settings/gpt/test', { method: 'POST' });
       status.textContent = `Clé enregistrée et testée : ${res.gpt.key_hint} ✓`;
@@ -2459,6 +2461,8 @@ async function openSettings() {
         el('label', {}, 'Adresse du proxy', base),
         el('label', {}, 'Modèle', model),
         el('label', {}, 'Clé', key),
+        el('p', { class: 'muted', text: `Sans clé GPT (ou si elle a expiré), Claude prend le relais (${s.claude?.model || 'claude-haiku-5-5'}). Sa clé se crée sur console.anthropic.com.` }),
+        el('label', {}, 'Clé Claude (secours)', claude),
         status,
         el('div', { class: 'actions', style: 'justify-content:flex-end' },
           el('button', { type: 'button', class: 'pill', onclick: close }, 'Fermer'),
