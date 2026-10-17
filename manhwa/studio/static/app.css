@@ -2586,3 +2586,21 @@ details.silent-block > summary .muted {
 .sound-focus.settling.held::after {
   animation-play-state: paused;
 }
+
+/* Qwen3-TTS : la voix décrite d'un personnage */
+.design-row {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+
+.design-row .voice-reason {
+  margin: 0;
+}
+
+.design-text {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}

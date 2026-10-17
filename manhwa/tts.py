@@ -50,13 +50,24 @@ def ensure_voices(chapter, crew, cfg):
     return True
 
 
+def use_qwen(cfg):
+    """[tts] engine = "qwen" et Qwen3-TTS installé (.venv-qwen, et .venv-tts pour la conversion)."""
+    from manhwa import qwen_voice
+
+    return cfg["tts"].get("engine") == "qwen" and qwen_voice.available()
+
+
 def plan(chapter, data, cfg, crew=None):
     """{fichier de frame: [segment]} : ce que chaque frame doit dire, et avec quelle voix."""
     from manhwa.cast import EXTRAS, NARRATOR, extra_voice, lines, load_cast
     from manhwa.voices import prosody
 
+    from manhwa import qwen_voice
+
     crew = crew or load_cast(chapter)
     by_key = {l["key"]: l for l in lines(data, crew)}
+    qwen = use_qwen(cfg)
+    designs = crew.get("designs") or {}
     voices = {c["id"]: c.get("voice") for c in crew["characters"]}
     narrator = narrator_voice(cfg, crew)
     out = {}
@@ -71,6 +82,10 @@ def plan(chapter, data, cfg, crew=None):
             if line["kind"] == "thought" and emotion == "neutral":
                 emotion = "thinking"
             params = prosody(cfg, voice, emotion)
+            if qwen:  # Qwen3-TTS : la voix décrite du personnage, l'émotion, puis son timbre fixe (qwen_voice.py)
+                default = qwen_voice.DEFAULT_DESIGNS["narrator" if speaker == NARRATOR else "extra_m"]
+                params = {k: params[k] for k in ("voice", "rate", "pitch", "volume")}
+                params.update(engine="qwen", design=designs.get(speaker) or default, emotion=emotion or "neutral")
             key = fingerprint(line["text"], params)
             segments.append({"text": line["text"], "speaker": speaker, "emotion": emotion, **params,
                              "audio_key": key, "audio": f"{chapter.audio_dir.name}/{key}.mp3"})
@@ -104,7 +119,12 @@ def run_tts(chapter, cfg, force=False, progress=None):
     from manhwa.cast import load_cast, save_cast
 
     crew = load_cast(chapter)
-    if ensure_voices(chapter, crew, cfg):
+    changed = ensure_voices(chapter, crew, cfg)
+    if use_qwen(cfg):
+        from manhwa.qwen_voice import ensure_designs
+
+        changed = ensure_designs(chapter, crew) or changed
+    if changed:
         save_cast(chapter, crew)
     data = chapter.load()
     planned = plan(chapter, data, cfg, crew)
@@ -127,8 +147,13 @@ def run_tts(chapter, cfg, force=False, progress=None):
     chapter.audio_dir.mkdir(parents=True, exist_ok=True)
     print(f"  Génération de {len(todo)} répliques...")
     try:
-        asyncio.run(_run(chapter, list(todo.values()), cfg, progress))
-        _recheck_expressive(chapter, data, [s for s in todo.values() if s.get("expressive")])
+        others = [s for s in todo.values() if s.get("engine") != "qwen"]
+        if others:
+            asyncio.run(_run(chapter, others, cfg, progress))
+            _recheck_expressive(chapter, data, [s for s in others if s.get("expressive")])
+        from manhwa import qwen_voice
+
+        qwen_voice.render_lines(chapter, data, [s for s in todo.values() if s.get("engine") == "qwen"], progress)
     finally:
         from manhwa import chatterbox_tts
 

@@ -30,6 +30,7 @@ rate = "+0%"                         # vitesse (+10% conseillé pour TikTok)
 volume = "+0%"
 concurrency = 4
 expressive = "all"   # "all" : toutes les voix jouent l'émotion (Chatterbox) ; "chosen" : seulement celles cochées
+engine = "qwen"      # "qwen" : voix décrites par GPT et jouées par Qwen3-TTS (qwen_voice.py) ; sinon Chatterbox / voix de base
 
 [render]
 speed = 1.1               # rythme de la vidéo : voix 10 % plus rapide, blancs raccourcis d'autant

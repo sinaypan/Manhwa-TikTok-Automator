@@ -324,3 +324,40 @@ def test_not_text_drops_its_pending_proposals(chapter):
     r = frame["review"]["IDON'T THINK CAN GO."]
     assert r["state"] == {"text": "rejected", "speaker": "rejected", "kind": "accepted"} and r["checked"]
     assert review.all_bubbles(data)[0]["kind"] == "noise"
+
+
+def test_qwen_lines_use_the_character_design_and_sentence_case(monkeypatch, tmp_path):
+    from manhwa import qwen_voice, tts
+    from manhwa.config import load_config
+
+    assert qwen_voice.sentence_case("YOU PARASITE! I SAID NO.") == "You parasite! I said no."
+    assert qwen_voice.sentence_case("Already fine") == "Already fine"
+    monkeypatch.setattr(qwen_voice, "available", lambda: True)
+    cfg = load_config()
+    cfg["tts"]["engine"] = "qwen"
+    assert tts.use_qwen(cfg)
+    cfg["tts"]["engine"] = "edge"
+    assert not tts.use_qwen(cfg)
+    assert set(qwen_voice.EMOTION) >= {"neutral", "angry", "shouting", "scared", "sad", "whisper"}
+
+
+def test_without_gpt_each_character_gets_a_different_voice_asked_again_later(monkeypatch, tmp_path):
+    from manhwa import llm, qwen_voice
+
+    class Ch:
+        root = tmp_path / "serie" / "ch1"
+
+        def load(self):
+            return {"frames": []}
+
+    Ch.root.mkdir(parents=True)
+    crew = {"characters": [{"id": "c1", "name": "A"}, {"id": "c2", "name": "B"}, {"id": "c3", "name": "C"}], "next": 4}
+    monkeypatch.setattr(llm, "chat", lambda *a, **k: (_ for _ in ()).throw(llm.LLMError("clé expirée")))
+    monkeypatch.setattr(qwen_voice, "_female_voices", lambda: [])
+    assert qwen_voice.ensure_designs(Ch(), crew)
+    voices = [crew["designs"][c] for c in ("c1", "c2", "c3")]
+    assert len(set(voices)) == 3 and crew["designs_auto"] == ["c1", "c2", "c3"]
+    assert "narrator" in crew["designs"]
+    monkeypatch.setattr(llm, "chat", lambda *a, **k: {"voices": [{"id": "c2", "voice": "Gruff old smuggler, natural and human"}]})
+    qwen_voice.ensure_designs(Ch(), crew)  # la clé est revenue : GPT redécrit
+    assert crew["designs"]["c2"] == "Gruff old smuggler, natural and human" and "c2" not in crew["designs_auto"]

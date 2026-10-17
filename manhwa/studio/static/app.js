@@ -1842,19 +1842,53 @@ function voiceRow(ch) {
     'div',
     { class: `voice-row${ch.voice_ok ? ' ok' : ''}` },
     el('button', { type: 'button', class: 'play', title: 'Écouter une de ses répliques', 'aria-label': 'Écouter', onclick: (e) => playSample(e.currentTarget, { char: ch.id }) }, icon('play')),
-    voiceSelect(v.name, (name) => updateChar(ch.id, { voice: { ...v, name } })),
-    el('span', { class: 'pitch' },
+    state.cast.qwen ? null : voiceSelect(v.name, (name) => updateChar(ch.id, { voice: { ...v, name } })),
+    state.cast.qwen ? null : el('span', { class: 'pitch' },
       el('button', { type: 'button', class: 'link quiet', title: 'Plus grave', onclick: () => shift(-6) }, '−'),
       el('span', { class: 'muted', text: pitch ? `${pitch > 0 ? '+' : ''}${pitch} Hz` : 'hauteur' }),
       el('button', { type: 'button', class: 'link quiet', title: 'Plus aigu', onclick: () => shift(6) }, '+')),
-    state.cast.expressive
+    state.cast.qwen ? null : state.cast.expressive
       ? el('button', { type: 'button', class: `chip-btn plain${v.expressive ? ' on' : ''}`, title: 'Voix plus vivante (Chatterbox, local) : le ton change avec l’émotion de chaque réplique', onclick: () => updateChar(ch.id, { voice: { ...v, expressive: !v.expressive } }) }, icon('sparkles'), 'Expressive')
       : null,
     ch.voice_ok
       ? el('span', { class: 'voice-ok' }, icon('check'), 'validée')
       : el('button', { type: 'button', class: 'chip-btn plain proposed', title: v.reason || '', onclick: () => updateChar(ch.id, { voice_ok: true }) }, icon('check'), 'Valider'),
-    !ch.voice_ok && v.reason ? el('p', { class: 'muted voice-reason', text: `${v.by === 'gpt' ? 'GPT' : 'Auto'} : ${v.reason}` }) : null,
+    !ch.voice_ok && v.reason && !state.cast.qwen ? el('p', { class: 'muted voice-reason', text: `${v.by === 'gpt' ? 'GPT' : 'Auto'} : ${v.reason}` }) : null,
+    designRow(ch.id),
   );
+}
+
+function designRow(char) {
+  // Qwen3-TTS : la voix est une description (GPT) ; « Autre voix » en redemande une, « Modifier » pour l'écrire
+  const c = state.cast;
+  if (!c.qwen) return null;
+  const text = c.designs?.[char];
+  const editing = state.editDesign === char;
+  if (editing) {
+    const box = el('textarea', { class: 'field design-text', rows: 2, text: text || '', 'aria-label': 'Description de la voix (en anglais)' });
+    setTimeout(() => box.focus(), 0);
+    return el('div', { class: 'design-row' }, box,
+      el('div', { class: 'who-chips' },
+        el('button', { type: 'button', class: 'chip-btn plain', onclick: () => { state.editDesign = null; renderCast(); } }, 'Annuler'),
+        el('button', { type: 'button', class: 'chip-btn plain on', onclick: () => setDesign(char, box.value) }, icon('check'), 'Enregistrer')));
+  }
+  return el('div', { class: 'design-row' },
+    el('p', { class: 'muted voice-reason', title: 'La voix que Qwen joue, avec l’émotion de chaque réplique', text: text ? `Voix : ${text}` : 'Voix : décrite par GPT à la création de la vidéo (▶ pour l’entendre).' }),
+    el('div', { class: 'who-chips' },
+      el('button', { type: 'button', class: 'chip-btn plain', title: 'GPT propose une autre voix pour ce personnage', onclick: () => setDesign(char, '') }, icon('sparkles'), 'Autre voix'),
+      el('button', { type: 'button', class: 'chip-btn plain', onclick: () => { state.editDesign = char; renderCast(); } }, icon('edit'), 'Modifier')));
+}
+
+async function setDesign(char, design) {
+  try {
+    toast(design ? 'Voix enregistrée' : 'GPT cherche une autre voix…');
+    state.cast = await api(`/api/cast/design?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify({ char, design }) });
+    state.editDesign = null;
+    renderCast();
+    toast('Voix changée : ▶ pour l’entendre (la première fois, ≈ 20 s)');
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
 }
 
 function narratorCard() {
@@ -1868,8 +1902,9 @@ function narratorCard() {
       'div',
       { class: 'voice-row ok' },
       el('button', { type: 'button', class: 'play', 'aria-label': 'Écouter', onclick: (e) => playSample(e.currentTarget, { char: c.narrator }) }, icon('play')),
-      voiceSelect(v.name, (name) => setNarrator({ ...v, name })),
+      c.qwen ? null : voiceSelect(v.name, (name) => setNarrator({ ...v, name })),
     ),
+    designRow(c.narrator),
   );
 }
 
@@ -1886,9 +1921,10 @@ function extrasCard() {
         { class: 'voice-row ok' },
         el('button', { type: 'button', class: 'play', 'aria-label': `Écouter ${x.label}`, onclick: (e) => playSample(e.currentTarget, { char: k }) }, icon('play')),
         el('span', { class: 'muted', text: x.label.replace('Figurant ', '') }),
-        voiceSelect(x.voice.name, (name) => setExtra(k, { ...x.voice, name })),
+        c.qwen ? null : voiceSelect(x.voice.name, (name) => setExtra(k, { ...x.voice, name })),
       ),
     ),
+    Object.keys(c.extras).map((k) => designRow(k)),
   );
 }
 

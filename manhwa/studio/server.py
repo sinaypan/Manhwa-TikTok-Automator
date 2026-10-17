@@ -19,7 +19,7 @@ from manhwa.progress import chapter_progress
 from manhwa.project import Chapter, find_chapters, is_chapter_dir
 from manhwa.studio import tiles
 from manhwa.studio.jobs import IMPORT_ID, Jobs
-from manhwa.tts import narrator_voice
+from manhwa.tts import narrator_voice, use_qwen
 
 STATIC = Path(__file__).parent / "static"
 
@@ -221,6 +221,8 @@ def create_app(cfg):
             "voices": voice_list(),
             "emotions": voices.EMOTION_LABELS,
             "expressive": chatterbox_available(),
+            "qwen": use_qwen(cfg),  # voix décrites et jouées par Qwen3-TTS : on montre la description
+            "designs": crew.get("designs") or {},
             "gpt": llm.public_settings(),
             "job": jobs.get(id),
         }
@@ -446,12 +448,48 @@ def create_app(cfg):
             cast.save_cast(chapter, crew)
         return cast_detail(id)
 
+    @app.put("/api/cast/design")
+    def cast_design(id: str = Query(...), payload: dict = Body(...)):
+        """La voix décrite d'un personnage (Qwen3-TTS) : changée à la main, ou redemandée à GPT (design vide)."""
+        from manhwa import qwen_voice
+
+        chapter = chapter_of(id)
+        char = str(payload.get("char") or "")
+        with cast_lock(chapter):
+            crew = cast.load_cast(chapter)
+            designs = crew.setdefault("designs", {})
+            text = " ".join(str(payload.get("design") or "").split())[:240]
+            if text:
+                designs[char] = text
+            else:
+                old = designs.pop(char, None)
+                qwen_voice.ensure_designs(chapter, crew, avoid={char: old} if old else None)
+            cast.save_cast(chapter, crew)
+        return cast_detail(id)
+
     @app.get("/api/voice_sample")
     def voice_sample(id: str = Query(...), char: str = Query(...), name: str | None = Query(None),
                      pitch: str | None = Query(None), rate: str | None = Query(None), expressive: str | None = Query(None)):
         """Un extrait de la voix : une réplique du personnage (ou une phrase type), avec ses réglages."""
         chapter = chapter_of(id)
         crew = cast.load_cast(chapter)
+        if use_qwen(cfg):  # la voix du personnage, telle que Qwen la joue (sa référence)
+            from manhwa import qwen_voice
+
+            design = (crew.get("designs") or {}).get(char)
+            if not design:
+                with cast_lock(chapter):
+                    crew = cast.load_cast(chapter)
+                    qwen_voice.ensure_designs(chapter, crew)
+                    cast.save_cast(chapter, crew)
+                design = crew["designs"].get(char) or qwen_voice.DEFAULT_DESIGNS["extra_m"]
+            try:
+                path = qwen_voice.sample(chapter, design)
+            except qwen_voice.Busy:
+                raise HTTPException(409, "Les voix sont en cours de création : réessaie dans un moment")
+            except Exception as e:
+                raise HTTPException(502, f"Extrait impossible : {e}")
+            return FileResponse(path, media_type="audio/wav")
         if char == cast.NARRATOR:
             voice = narrator_voice(cfg, crew)
         elif char in cast.EXTRAS:

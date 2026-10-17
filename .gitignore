@@ -25,6 +25,7 @@ __pycache__/
 # Environnements virtuels
 .venv/
 .venv-tts/
+.venv-qwen/
 venv/
 env/
 
