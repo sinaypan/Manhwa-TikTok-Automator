@@ -310,7 +310,8 @@ AMB_SECONDS = 25
 AMB_SKIP = (r"chairlift|metro|barcelona|plane|iceberg|geese|apartment|children|house party|burger|beach|football|"
             r"compressor|machine|mothership|gas burner|dry ice|jet ski|toyota|bmw|volvo|alfa|b-25|brdm|tugboat|"
             r"screwdriver|nighthawk|hawk|falcon|drawer|nightstand|sink|encarta|loretta|tongues|orcs|audience|cannon|"
-            r"exhibition|designed|splashes|dive in|inside boat|plastic|ice on stream|swoosh")
+            r"exhibition|designed|splashes|dive in|inside boat|plastic|ice on stream|swoosh|whoosh|fear|horror|"
+            r"open window|dry_ice|rally|cheering|eagle")
 AMB_FADE = 1.5  # la fin se fond dans le début : la boucle ne s'entend pas
 
 
@@ -332,10 +333,32 @@ def _loop(y):
     return y * min(TARGET_RMS / rms, 0.95 / max(float(np.abs(y).max()), 1e-6))
 
 
+def _synth_ambiences(folder, seconds=AMB_SECONDS + AMB_FADE, rate=RATE):
+    """Deux fonds fabriqués : une pièce calme (souffle très doux) et un feu de cheminée."""
+    from manhwa.sfx import _lowpass
+
+    rng = np.random.default_rng(11)
+    n = int(seconds * rate)
+    room = _lowpass(rng.standard_normal(n), 0.008)
+    room += 0.15 * _lowpass(rng.standard_normal(n), 0.05)
+    _write(folder / "Quiet indoor room tone.wav", 0.5 * room / (np.abs(room).max() + 1e-9))
+    rumble = _lowpass(rng.standard_normal(n), 0.004)
+    crackle = np.zeros(n)
+    for start in rng.integers(0, n - 2000, int(22 * seconds)):
+        m = int(rng.integers(120, 700))
+        crackle[start:start + m] += rng.uniform(0.2, 1.0) * rng.standard_normal(m) * np.exp(-np.arange(m) / (m / 5))
+    crackle = crackle - _lowpass(crackle, 0.15)
+    fire = 0.6 * rumble / (np.abs(rumble).max() + 1e-9) + 0.45 * crackle
+    _write(folder / "Fireplace crackling indoor.wav", 0.8 * fire / (np.abs(fire).max() + 1e-9))
+
+
 def prepare_ambience(progress=None):
     """Les ambiances de .cache/sonniss/ambience/ : en boucles, écoutées par CLAP. Renvoie leur nombre."""
     folder = bank_dir() / "ambience"
     folder.mkdir(parents=True, exist_ok=True)
+    synth = ambience_raw_dir() / "_fabriquées"
+    synth.mkdir(parents=True, exist_ok=True)
+    _synth_ambiences(synth)
     files = sorted(p for p in ambience_raw_dir().rglob("*") if p.suffix.lower() in (".wav", ".flac")) \
         if ambience_raw_dir().is_dir() else []
     rows = []

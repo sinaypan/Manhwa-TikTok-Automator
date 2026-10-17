@@ -70,8 +70,9 @@ def run_places(chapter, cfg=None, progress=None):
             f"An episode of {len(panels)} panels has about {max(3, len(panels) // 15)} places. For each place give: "
             "from (first panel number), place (English, under 10 words), space (small: a room or cell; large: a hall, "
             "a cave, a temple; outdoor), hear (English, under 10 words: only the steady background you would hear "
-            "there, like room tone, wind, rain, a distant crowd, a fire, birds, water drips; never events like "
-            "screams, glass breaking or footsteps). Cover every panel. Answer JSON: {\"places\": [{\"from\", "
+            "there, like room tone, rain, a distant crowd, a fire, birds, water drips; never events like "
+            "screams, glass breaking or footsteps; wind only for a really windy place: a storm, a mountain top, a "
+            "desert). Cover every panel. Answer JSON: {\"places\": [{\"from\", "
             "\"place\", \"space\", \"hear\"}]}")
     answer = chat([{"role": "system", "content": rule},
                    {"role": "user", "content": json.dumps({"panels": panels}, ensure_ascii=False)}], max_tokens=4000)
@@ -90,20 +91,37 @@ def run_places(chapter, cfg=None, progress=None):
     scenes[0]["from"] = 1
     if progress:
         progress(1, 2)
-    if soundbank.ambience_ready():
-        try:
-            vecs = soundbank.embed_texts([f"{s['hear']}, ambience" for s in scenes])
-            for s, v in zip(scenes, vecs):
-                s["q"] = base64.b64encode(v.astype(np.float16).tobytes()).decode()
-                s["ambience"] = soundbank.best_ambience(v)
-        finally:
-            soundbank.close()
+    pick_ambiences(scenes)
     path = places_path(chapter)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"key": _key(data), "scenes": scenes}, ensure_ascii=False), encoding="utf-8")
     if progress:
         progress(2, 2)
     return len(scenes)
+
+
+def pick_ambiences(scenes):
+    """L'ambiance de chaque lieu : la boucle la plus proche de ce qu'on y entend (CLAP)."""
+    from manhwa import soundbank
+
+    if not scenes or not soundbank.ambience_ready():
+        return
+    try:
+        vecs = soundbank.embed_texts([f"{s['hear']}, ambience" for s in scenes])
+        for s, v in zip(scenes, vecs):
+            s["q"] = base64.b64encode(v.astype(np.float16).tobytes()).decode()
+            s["ambience"] = soundbank.best_ambience(v)
+    finally:
+        soundbank.close()
+
+
+def refresh_ambiences(chapter):
+    """Les lieux gardés, leur ambiance rechoisie (la bibliothèque ou leur description a changé)."""
+    places = load_places(chapter)
+    if places.get("scenes"):
+        pick_ambiences(places["scenes"])
+        places_path(chapter).write_text(json.dumps(places, ensure_ascii=False), encoding="utf-8")
+    return len(places.get("scenes") or [])
 
 
 def frame_places(chapter, data):

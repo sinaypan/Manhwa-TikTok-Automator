@@ -48,7 +48,7 @@ transition_seconds = 0.3
 effects = true            # l'image tremble sur un coup, flash sur un coup violent (d'après les sons)
 depth = true              # relief : pendant le zoom, le premier plan avance un peu plus que le fond
 ambience = true           # une ambiance de fond par lieu (prison, forêt, marché…), sous les voix
-ambience_volume = 0.22
+ambience_volume = 0.13    # le fond reste discret, surtout sans voix par-dessus
 voice_space = true        # les voix prennent de la chaleur et résonnent comme le lieu
 loudness = -14            # niveau final du son (LUFS, comme TikTok) ; 0 = laisser tel quel
 captions = true           # sous-titres karaoké (le mot dit passe en jaune)

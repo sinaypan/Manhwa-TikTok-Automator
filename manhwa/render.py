@@ -403,7 +403,7 @@ def run_render(chapter, cfg, force=False, progress=None):
             paths = {a: str(ambience_file(a)) for a, _, _ in secs if ambience_file(a)}
             secs = [s for s in secs if s[0] in paths]
             if secs:
-                amb_r = {**r, "music_volume": float(r.get("ambience_volume", 0.22)), "music_duck": 0.6}
+                amb_r = {**r, "music_volume": float(r.get("ambience_volume", 0.13)), "music_duck": 0.6}
                 ambience = _mood_track(secs, paths, durations, voiced, amb_r, opened, fade=2.0)
         layers = ([a.with_start(t) for a, t in zip(audios, starts) if a is not None] + ([music] if music is not None else [])
                   + ([ambience] if ambience is not None else []))
