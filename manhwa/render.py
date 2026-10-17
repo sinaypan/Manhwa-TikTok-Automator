@@ -6,6 +6,8 @@
     - passage d'une frame à l'autre : la nouvelle pousse l'ancienne vers le haut, comme un
       webtoon qu'on fait défiler (ou un fondu : [render] transition = "fade") ;
     - les bruitages choisis (manhwa/sfx.py) partent au début de leur case, sous la voix ;
+    - l'image réagit aux coups : elle tremble, un flash sur un coup violent (manhwa/motion.py) ;
+    - relief : pendant le zoom, le premier plan avance un peu plus que le fond (motion.depth_map) ;
     - une musique de fond (fichier dans music/ ou [render] music) tourne en boucle et
       baisse pendant que les personnages parlent.
 """
@@ -35,16 +37,19 @@ def music_file(cfg):
 
 
 def render_key(chapter, data, cfg):
-    from manhwa.sfx import video_sounds
+    from manhwa.motion import effects
+    from manhwa.sfx import video_hits, video_sounds
 
     sounds = video_sounds(chapter, data, cfg)
+    hits = video_hits(chapter, data, cfg) if cfg["render"].get("effects", True) else {}
     parts = []
     for frame in data["frames"]:
         img = chapter.frames_dir / frame["file"]
         stat = img.stat() if img.is_file() else None
         voices = [seg.get("audio_key") for seg in frame.get("segments") or []] or frame.get("audio_key")
         parts.append([frame["file"], frame.get("crop"), stat and stat.st_size, stat and stat.st_mtime_ns, voices,
-                      [os.path.basename(s) for s in sounds.get(frame["file"], [])]])
+                      [[os.path.basename(s), g] for s, g in sounds.get(frame["file"], [])],
+                      effects(hits.get(frame["file"], []))])
     music = music_file(cfg)
     mood = None
     if cfg["render"].get("music_moods", True) and not (cfg["render"].get("music") or "").strip():
@@ -263,10 +268,14 @@ def run_render(chapter, cfg, force=False, progress=None):
     speed = float(r.get("speed", 1.0))  # la voix est déjà accélérée (tts) : on raccourcit les blancs
     zoom = float(r.get("zoom", 0.04))
     pan = bool(r.get("pan", True))
-    sounds = {}
+    from manhwa import motion
+    from manhwa.sfx import video_hits
+
+    sounds, reacts = {}, {}
     try:
         ensure_library()
         sounds = video_sounds(chapter, data, cfg)
+        reacts = video_hits(chapter, data, cfg) if r.get("effects", True) else {}
     except Exception as e:
         print(f"  [!] Bruitages indisponibles ({e}) : vidéo sans bruitages")
     strip = None
@@ -298,11 +307,12 @@ def run_render(chapter, cfg, force=False, progress=None):
             voice = concatenate_audioclips(joined) if len(joined) > 1 else pieces[0]
         duration = voice.duration + r["padding_seconds"] / speed if voice else r["silent_frame_seconds"] / speed
 
-        hits = [a for a in (_load_audio(p) for p in sounds.get(frame["file"], [])) if a]
-        opened += hits
+        hits = [(a, g) for a, g in ((_load_audio(p), g) for p, g in sounds.get(frame["file"], [])) if a]
+        opened += [a for a, _ in hits]
         if hits and not voice:
-            duration = max(duration, min(3.0, max(h.duration for h in hits) + 0.2))
-        layers = ([voice] if voice else []) + [h.with_start(0.05 + 0.25 * k).with_volume_scaled(VOLUME) for k, h in enumerate(hits)]
+            duration = max(duration, min(3.0, max(h.duration for h, _ in hits) + 0.2))
+        layers = ([voice] if voice else []) + [h.with_start(0.05 + 0.25 * k).with_volume_scaled(VOLUME * g)
+                                               for k, (h, g) in enumerate(hits)]
         audio = CompositeAudioClip(layers).with_duration(duration) if layers else None
 
         tall = _tall_image(strip, frame["crop"], out_w) if pan else None
@@ -310,7 +320,18 @@ def run_render(chapter, cfg, force=False, progress=None):
             clip = pan_clip(tall, out_h, duration)
         else:
             rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            clip = zoom_clip(rgb, duration, zoom, zoom_in=i % 2 == 0) if zoom > 0 else zoom_clip(rgb, duration, 0)
+            depth = None
+            if zoom > 0 and r.get("depth", True):
+                try:
+                    depth = motion.depth_map(rgb, motion.panel_rect(rgb, frame["crop"][2:4]))
+                except Exception as e:  # sans le modèle : le zoom simple
+                    print(f"  [!] Relief indisponible ({e})")
+                    r = {**r, "depth": False}
+            if depth is not None:
+                clip = motion.depth_zoom_clip(rgb, depth, duration, zoom, zoom_in=i % 2 == 0)
+            else:
+                clip = zoom_clip(rgb, duration, zoom, zoom_in=i % 2 == 0) if zoom > 0 else zoom_clip(rgb, duration, 0)
+        clip = motion.apply(clip, motion.effects(reacts.get(frame["file"], [])))  # tremblement, flash sur les coups
         clips.append(clip)
         audios.append(audio)
         durations.append(duration)

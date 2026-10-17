@@ -136,6 +136,14 @@ SHORT = 0.6        # s : une case qui passe plus vite ne se voit pas
 LONG = 12.0        # s : une case affichée plus longtemps lasse
 
 
+def _bubble_key(frame, text):
+    """La bulle (« frame#index ») dont la voix lit ce texte."""
+    from manhwa.review import effective
+
+    j = next((b["index"] for b in effective(frame) if b["text"] == text), None)
+    return f"{frame['file']}#{j}" if j is not None else None
+
+
 def checks(chapter, data):
     """Ce qui cloche dans la vidéo, sans la regarder : [{"frame", "t", "kind", "text"}]."""
     from manhwa.textfix import protected_words
@@ -155,7 +163,7 @@ def checks(chapter, data):
             if not (chapter.root / s["audio"]).is_file():
                 out.append({"frame": f["file"], "t": t, "kind": "missing", "text": f"Voix manquante : « {s['text'][:60]} »"})
             elif flagged(s, names):
-                out.append({"frame": f["file"], "t": t, "kind": "heard",
+                out.append({"frame": f["file"], "t": t, "kind": "heard", "key": _bubble_key(f, s["text"]),
                             "text": f"La voix a dit « {s.get('heard', '')[:60]} » au lieu de « {s['text'][:60]} »"})
     return sorted(out, key=lambda c: c["t"])
 

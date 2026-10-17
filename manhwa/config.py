@@ -26,9 +26,10 @@ DEFAULTS = {
     },
     "render": {"speed": 1.0, "fps": 24, "padding_seconds": 0.2, "silent_frame_seconds": 2.0,
                "zoom": 0.04, "pan": True, "music": "", "music_volume": 0.16, "music_duck": 0.4,
-               "transition": "slide", "transition_seconds": 0.3,
+               "transition": "slide", "transition_seconds": 0.3, "effects": True, "depth": True,
                "music_moods": True, "captions": True, "captions_words": 4, "captions_font": "", "captions_size": 78},
     "auto": {"sounds": True, "review": True, "speakers": 0.0},
+    "sounds": {"vision": "local"},
     "scraper": {
         "headless": False,
         "workers": 5,

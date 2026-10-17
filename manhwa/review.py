@@ -213,6 +213,8 @@ def proposals(data, crew):
             for field, state in (r.get("state") or {}).items():
                 old = {"text": b["text"], "kind": b["kind"], "speaker": (frame.get("speakers") or {}).get(b["text"])}[field]
                 new = r.get(field)
+                if state == "pending" and new == old:
+                    continue  # déjà ainsi (tu as choisi la même chose entre-temps) : rien à décider
                 out.append({
                     "key": f"{frame['file']}#{j}", "frame": frame["file"], "field": field, "state": state,
                     "by": r.get("by") or ("mine" if r.get("mine") else "gpt"),
@@ -308,6 +310,10 @@ def check_bubble(data, key, text=None, kind=None, checked=None):
             r["kind"], state["kind"], r["mine"] = kind, "accepted", True
         elif "kind" in state:
             state["kind"] = "rejected"
+        if kind not in SPOKEN:  # plus lue : ses propositions de texte et de « qui parle » n'ont plus lieu d'être
+            for field in ("text", "speaker"):
+                if state.get(field) == "pending":
+                    state[field] = "rejected"
     if checked is not None:
         r["checked"] = bool(checked)
 

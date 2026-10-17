@@ -2005,6 +2005,10 @@ select.emotion.set {
   animation: settle var(--settle, 4s) linear forwards;
 }
 
+.line-row.settling.held::after {
+  animation-play-state: paused;
+}
+
 @keyframes settle {
   from {
     width: 100%;
@@ -2286,4 +2290,299 @@ details.silent-block > summary .muted {
 .part p {
   margin: 2px 0 0;
   font-size: 12px;
+}
+
+/* ---------- Bandeau d'avancement (tous les onglets) ---------- */
+#job-dock {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 19;
+  width: min(420px, calc(100vw - 32px));
+  max-height: 70vh;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  animation: dock-in 0.2s ease;
+}
+
+#job-dock.error {
+  box-shadow: var(--shadow), inset 0 0 0 1px var(--warn);
+}
+
+#job-dock.done {
+  box-shadow: var(--shadow), inset 0 0 0 1px var(--ok);
+}
+
+#job-dock .dock-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+}
+
+#job-dock .dock-line .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+#job-dock.done .dock-line > svg {
+  stroke: var(--ok);
+  stroke-width: 2.5;
+}
+
+#job-dock .bar {
+  margin-top: 8px;
+}
+
+#job-dock .card {
+  margin-top: 10px;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+
+@keyframes dock-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* ---------- Sons : la bande-son de l'épisode, puis une case à la fois ---------- */
+#sounds {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr); /* la bande-son défile dedans, elle n'élargit pas la page */
+  gap: 14px;
+  max-width: 960px;
+}
+
+.strip-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.strip-card .legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.strip-card .legend i {
+  width: 10px;
+  height: 10px;
+  margin-left: 6px;
+  border-radius: 3px;
+}
+
+.legend i.todo,
+.strip-item.todo {
+  --mark: var(--accent);
+}
+
+.legend i.done,
+.strip-item.done {
+  --mark: var(--ok);
+}
+
+.legend i.none,
+.strip-item.none {
+  --mark: var(--muted);
+}
+
+.legend i {
+  background: var(--mark);
+}
+
+.sound-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+
+.strip-item {
+  flex: 0 0 64px;
+  display: grid;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--field);
+  box-shadow: inset 0 -3px 0 var(--mark);
+  cursor: pointer;
+}
+
+.strip-item img {
+  width: 58px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.strip-item span {
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.strip-item.todo span {
+  color: var(--accent);
+}
+
+.strip-item.on {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.sound-focus {
+  max-width: none;
+}
+
+.sound-focus .focus-body {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+}
+
+/* l'image a toujours la même hauteur : les boutons du bas ne bougent pas d'une case à l'autre */
+.sound-focus .shot {
+  height: min(52vh, 520px);
+  max-height: none;
+  aspect-ratio: auto !important;
+  background: #000;
+}
+
+.sound-focus .shot img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.sound-focus .line-body {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  height: min(52vh, 520px);
+  overflow-y: auto;
+}
+
+.sound-focus .line-body > p {
+  margin: 0;
+}
+
+.sound-focus .proposal {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--tint);
+}
+
+.sound-focus .proposal.mine {
+  background: color-mix(in srgb, var(--ok) 18%, var(--field));
+}
+
+.sound-focus .proposal p {
+  margin: 0;
+}
+
+.proposal-sound {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.proposal-sound:disabled {
+  cursor: default;
+}
+
+.proposal-sound svg {
+  width: 18px;
+  height: 18px;
+  padding: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  stroke: var(--accent-text);
+  box-sizing: content-box;
+}
+
+.proposal-sound.on svg {
+  background: var(--ok);
+}
+
+.chip-pair {
+  display: inline-flex;
+}
+
+.chip-pair .chip-btn:first-child:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.chip-pair .chip-btn.add {
+  padding-inline: 9px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: 1px;
+  font-weight: 600;
+}
+
+.sound-focus .chip-btn > svg {
+  width: 12px;
+  height: 12px;
+}
+
+.sound-library {
+  display: grid;
+  gap: 8px;
+}
+
+.sound-library .family {
+  display: grid;
+  gap: 4px;
+}
+
+.sound-focus.settling {
+  box-shadow: var(--shadow), inset 0 0 0 2px var(--ok);
+}
+
+@media (max-width: 760px) {
+  .sound-focus .focus-body {
+    grid-template-columns: 1fr;
+  }
+
+  .sound-focus .line-body {
+    height: auto;
+  }
+}
+
+.sound-focus {
+  position: relative;
+  overflow: hidden;
+}
+
+.sound-focus.settling::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 4px;
+  background: var(--ok);
+  animation: settle var(--settle, 2s) linear forwards;
+}
+
+.sound-focus.settling.held::after {
+  animation-play-state: paused;
 }

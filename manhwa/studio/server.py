@@ -556,10 +556,16 @@ def create_app(cfg):
             ready = True
         except Exception:
             ready = False
+        from manhwa import vision
+
         music = music_file(cfg)
         seen = scene.load_scene(chapter)
+        timeline = {file: [start, duration] for file, start, duration in (data["steps"].get("render") or {}).get("timeline") or []}
         return {"spots": sfx.spots(data, seen), "actions": sfx.silent_frames(data, seen), "categories": sfx.labels(),
-                "scene_done": scene.scene_done(chapter, data),
+                "families": sfx.FAMILIES, "scene_done": scene.scene_done(chapter, data),
+                "described": vision.describe_done(chapter, data),
+                "understood": any("ai" in v for v in seen.values()) if isinstance(seen, dict) else False,
+                "vision": vision.backend(cfg), "timeline": timeline, "video": chapter.video_path.is_file(),
                 "gpt": llm.public_settings(), "none": sfx.NONE, "library": ready,
                 "music": Path(music).name if music else None, "ocr_done": any("bubbles" in f for f in data["frames"]),
                 "moods": bool(cfg["render"].get("music_moods", True)) and not (cfg["render"].get("music") or "").strip(),
@@ -588,21 +594,41 @@ def create_app(cfg):
 
     @app.post("/api/sounds/suggest")
     def sounds_suggest(id: str = Query(...)):
-        """GPT propose un son pour les cases sans texte."""
+        """Comprendre les cases : chacune est décrite (en local), puis GPT choisit les sons d'après l'histoire."""
         if not llm.public_settings()["configured"]:
             raise HTTPException(422, "Colle d'abord la clé GPT (Réglages)")
-        return jobs.submit(id, chapter_of(id), kind="sounds")
+        return jobs.submit(id, chapter_of(id), kind="understand")
 
     @app.get("/api/sfx_sample")
-    def sfx_sample(cat: str = Query(...), text: str = Query("")):
-        if cat not in sfx.CATEGORIES:
+    def sfx_sample(cat: str = Query(...), text: str = Query(""), id: str = Query(""), key: str = Query("")):
+        """Le son seul ; avec id et key, la prise choisie pour cette case (la plus proche de ce qu'on doit entendre)."""
+        if not sfx.layers(cat):
             raise HTTPException(404, "Catégorie inconnue")
         sfx.ensure_library()
+        ai = None
+        if id and key:
+            file = key[len(sfx.ACTION_PREFIX):] if key.startswith(sfx.ACTION_PREFIX) else key.partition("#")[0]
+            ai = ((scene.load_scene(chapter_of(id)).get(file) or {}).get("ai") or {}).get(key)
+        if "+" in cat or ai:  # deux sons, ou la prise de cette case : comme dans la vidéo
+            return Response(sfx.mix(cat, text, ai=ai), media_type="audio/wav", headers={"Cache-Control": "no-cache"})
         path = sfx.pick(cat, text)
         if not path:
             raise HTTPException(404, "Aucun son dans cette catégorie")
         kind = {".ogg": "audio/ogg", ".wav": "audio/wav", ".mp3": "audio/mpeg"}.get(path.suffix.lower(), "application/octet-stream")
         return FileResponse(path, media_type=kind, headers={"Cache-Control": "max-age=3600"})
+
+    @app.get("/api/sounds/preview")
+    def sounds_preview(id: str = Query(...), frame: str = Query(...), sound: str = Query("none"), seed: str = Query(""),
+                       key: str = Query("")):
+        """La case comme dans la vidéo : sa voix, et le son choisi par-dessus (sans refaire la vidéo)."""
+        chapter = chapter_of(id)
+        f = next((x for x in chapter.load()["frames"] if x["file"] == frame), None)
+        if not f:
+            raise HTTPException(404, "Case inconnue")
+        sfx.ensure_library()
+        key = key or f"frame:{frame}"
+        ai = ((scene.load_scene(chapter).get(frame) or {}).get("ai") or {}).get(key)
+        return Response(sfx.mix(sound, seed or frame, chapter, f, ai=ai), media_type="audio/wav")
 
     @app.get("/api/music")
     def music():
@@ -635,7 +661,7 @@ def create_app(cfg):
                 "lines": [{"text": seg["text"], "speaker": labels.get(seg.get("speaker"), "?"),
                            "voice": voices.short_name(seg.get("voice")), "emotion": voices.EMOTION_LABELS.get(seg.get("emotion"), "")}
                           for seg in frame.get("segments") or []],
-                "sounds": [Path(x).parent.name for x in sounds.get(file, [])],
+                "sounds": [sfx.category_of(x) for x, _ in sounds.get(file, [])],
             })
         from manhwa.listen import checks
         from manhwa.pilot import summary

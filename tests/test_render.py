@@ -60,7 +60,7 @@ def test_render_with_voices_sfx_pan_and_music(tmp_path, monkeypatch):
     ]
     ch.save(data)
     monkeypatch.setattr(sfx, "ensure_library", lambda: tmp_path)
-    monkeypatch.setattr(sfx, "pick", lambda cat, text: tmp_path / "boom.wav")
+    monkeypatch.setattr(sfx, "pick", lambda cat, text, query=None: tmp_path / "boom.wav")
 
     assert render.run_render(ch, cfg)
     from moviepy import VideoFileClip

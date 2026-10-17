@@ -1,0 +1,305 @@
+"""La bibliothèque pro : des bruitages de studio, rangés et choisis par CLAP (un modèle qui écoute).
+
+Les sons viennent des « GDC Game Audio Bundles » de Sonniss (libres de droits, usage commercial
+et vidéos monétisées permis, sans crédit). La licence interdit deux choses : les redistribuer
+(ils restent dans .cache/, jamais commités) et s'en servir pour entraîner une IA (on ne fait que
+les écouter avec CLAP, sans rien entraîner).
+
+    python -m manhwa.soundbank          prépare la bibliothèque (une fois, ≈ 5 min)
+
+1. Chaque fichier de .cache/sonniss/raw/ (et de sfx/<catégorie>/) est coupé en prises : un fichier
+   pro contient souvent plusieurs coups séparés par des silences. Chaque prise (0,1 à 4 s) est mise
+   au même volume (on règle ensuite le volume selon la force du moment, pas selon le fichier).
+2. CLAP écoute chaque prise et la range dans une catégorie de sfx.CATEGORIES (« a heavy punch
+   hitting a body »…), aidé par le nom du fichier ; ce qui ne ressemble à rien d'utile est écarté.
+3. Pour une case, la phrase de GPT (« heavy body slammed into a wooden wall ») est comparée à
+   toutes les prises de la catégorie : la plus proche est prise.
+
+Résultat dans .cache/soundbank/ : les prises (.wav), index.json et vectors.npy.
+"""
+import hashlib
+import json
+import os
+import re
+import subprocess
+import threading
+import wave
+
+import numpy as np
+
+from manhwa.config import ROOT
+
+RATE = 44100
+TARGET_RMS = 0.1  # ≈ -20 dBFS : toutes les prises au même volume
+MIN_TAKE, MAX_TAKE = 0.1, 4.0
+MAX_TAKES = 6  # par fichier : assez de variété sans noyer la catégorie sous un seul pack
+MIN_SCORE = 0.25  # en dessous, CLAP n'est pas sûr (une Jeep rangée dans « contre un mur ») : la prise ne sert pas
+MIN_TAKES = 3  # une catégorie avec moins de bonnes prises garde les sons d'avant (Kenney, fabriqués)
+BANK_VERSION = 1
+# ce que CLAP doit reconnaître (en anglais : il a appris comme ça)
+PROMPTS = {
+    "punch": "a punch hitting a body, fist fight sound effect",
+    "impact": "a heavy dull impact thud",
+    "slam": "a body slammed hard against a wall, violent crash",
+    "fall": "a body falling to the ground",
+    "slash": "a sword slash cutting through flesh",
+    "blade_draw": "a sword being unsheathed, metallic scrape and ring",
+    "metal": "swords clashing, metal clang",
+    "energy": "an energy beam blast",
+    "blood": "blood splatter, wet gore squelch",
+    "heartbeat": "a heartbeat",
+    "footsteps": "footsteps walking",
+    "cloth": "cloth rustling, clothes movement",
+    "door": "a door opening or closing",
+    "glass": "glass shattering",
+    "wood": "wood cracking or knocking",
+    "bell": "a bell or gong ringing",
+    "coins": "coins jingling",
+    "paper": "paper rustling, book pages",
+    "fire": "fire burning, crackling flames",
+    "wind": "a gust of wind",
+    "thunder": "thunder rumble",
+    "explosion": "an explosion",
+    "rumble": "a deep earth rumble, tremor",
+    "magic": "a magical spell shimmer",
+    "whoosh": "a fast whoosh swoosh",
+}
+# ce qu'on écarte (une prise plus proche de ça que d'un bruitage utile)
+REJECT = ["music", "people talking, speech", "a car or motorcycle engine", "a gunshot", "a robot voice",
+          "room tone, quiet ambience", "electronic beeps, 8-bit game sounds"]
+# le nom du fichier aide CLAP (« Punch_Heavy_03.wav » est sans doute un coup de poing)
+NAME_HINTS = {
+    "punch": r"punch|fist|kick", "slam": r"body ?fall|bodyfall|slam", "slash": r"slash|stab|slice|cut",
+    "blade_draw": r"unsheath|sheath|draw", "metal": r"sword|clang|clash|metal", "blood": r"blood|gore|splat|squelch|flesh|guts|bone",
+    "whoosh": r"whoosh|swoosh|swish|woosh", "footsteps": r"footstep|step", "cloth": r"cloth|fabric", "door": r"door",
+    "fire": r"fire|flame", "thunder": r"thunder", "explosion": r"explo", "glass": r"glass|shatter", "bell": r"bell|gong",
+    "paper": r"paper|book", "coins": r"coin", "impact": r"impact|hit|thud|thump",
+}
+_WORKER = {}
+_LOCK = threading.Lock()
+
+
+def raw_dir():
+    return ROOT / ".cache" / "sonniss" / "raw"
+
+
+def bank_dir():
+    return ROOT / ".cache" / "soundbank"
+
+
+# ---------- CLAP, dans .venv-tts ----------
+
+def _worker():
+    w = _WORKER.get("p")
+    if w and w.poll() is None:
+        return w
+    from manhwa import chatterbox_tts, vision
+
+    chatterbox_tts.close()
+    vision.close()
+    worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clap_worker.py")
+    p = subprocess.Popen([str(chatterbox_tts.python()), "-u", worker], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, text=True, encoding="utf-8", cwd=str(ROOT))
+    if not chatterbox_tts._answer(p).get("ready"):
+        p.kill()
+        raise RuntimeError("CLAP n'a pas démarré (environnement .venv-tts ?)")
+    _WORKER["p"] = p
+    return p
+
+
+def close():
+    p = _WORKER.pop("p", None)
+    if p and p.poll() is None:
+        try:
+            p.stdin.close()
+            p.wait(timeout=20)
+        except Exception:
+            p.kill()
+
+
+def _ask(job):
+    import tempfile
+
+    from manhwa.chatterbox_tts import _answer
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "v.npy")
+        with _LOCK:
+            p = _worker()
+            p.stdin.write(json.dumps({**job, "out": out}) + "\n")
+            p.stdin.flush()
+            answer = _answer(p)
+        if "error" in answer:
+            raise RuntimeError(answer["error"])
+        return np.load(out)
+
+
+def embed_texts(texts):
+    return _ask({"text": list(texts)}) if texts else np.zeros((0, 512), np.float32)
+
+
+def embed_audio(paths):
+    return _ask({"audio": [str(p) for p in paths]})
+
+
+# ---------- Les prises ----------
+
+def _decode(path):
+    import imageio_ffmpeg
+
+    raw = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-v", "quiet", "-i", str(path), "-f", "s16le", "-ac", "1",
+                          "-ar", str(RATE), "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.int16).astype(np.float32) / 32768
+
+
+def takes(y, rate=RATE):
+    """Les prises d'un fichier : morceaux séparés par au moins 0,25 s de quasi-silence."""
+    if not len(y):
+        return []
+    hop = int(0.01 * rate)
+    env = np.sqrt(np.convolve(y ** 2, np.ones(hop) / hop, mode="same"))[::hop]
+    loud = env > max(1e-4, 0.03 * env.max())  # ≈ -30 dB sous le plus fort
+    out, start, quiet = [], None, 0
+    for i, on in enumerate(np.append(loud, False)):
+        if on:
+            start = i if start is None else start
+            quiet = 0
+        elif start is not None:
+            quiet += 1
+            if quiet >= 25 or i == len(loud):
+                a, b = max(0, start - 2) * hop, min(len(y), (i - quiet + 6) * hop)
+                if MIN_TAKE * rate <= b - a:
+                    out.append(y[a:min(b, a + int(MAX_TAKE * rate))])
+                start, quiet = None, 0
+    return out
+
+
+def _level(y):
+    """Même volume pour toutes les prises (RMS de la partie forte), sans écrêter, avec un fondu de fin."""
+    rms = np.sqrt(np.mean(y[np.abs(y) > 0.1 * np.abs(y).max()] ** 2)) if np.abs(y).max() > 0 else 1
+    y = y * min(TARGET_RMS / max(rms, 1e-6), 0.98 / max(np.abs(y).max(), 1e-6))
+    fade = min(len(y) // 4, int(0.05 * RATE))
+    if fade:
+        y[-fade:] *= np.linspace(1, 0, fade)
+    return y
+
+
+def _write(path, y):
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes((np.clip(y, -1, 1) * 32767).astype(np.int16).tobytes())
+
+
+def sources():
+    from manhwa.sfx import user_dir
+
+    out = []
+    for folder in (raw_dir(), user_dir()):
+        if folder.is_dir():
+            out += sorted(p for p in folder.rglob("*") if p.suffix.lower() in (".wav", ".ogg", ".mp3", ".flac", ".aif", ".aiff"))
+    return out
+
+
+def _hint(name):
+    low = name.lower()
+    return next((cat for cat, rx in NAME_HINTS.items() if re.search(rx, low)), None)
+
+
+def prepare(progress=None):
+    """Coupe, met au même volume, écoute et range toute la bibliothèque. Renvoie le nombre de prises."""
+    folder = bank_dir()
+    (folder / "takes").mkdir(parents=True, exist_ok=True)
+    rows = []
+    files = sources()
+    for i, src in enumerate(files):
+        try:
+            y = _decode(src)
+        except Exception:
+            continue
+        for k, t in enumerate(takes(y)[:MAX_TAKES]):
+            name = hashlib.sha1(f"{src.name}:{k}".encode()).hexdigest()[:16] + ".wav"
+            _write(folder / "takes" / name, _level(t))
+            user = src.is_relative_to(ROOT / "sfx")
+            rows.append({"file": name, "src": src.name, "pack": src.parent.name, "dur": round(len(t) / RATE, 2),
+                         "user_cat": src.parent.name if user else None})
+        if progress:
+            progress(i + 1, 2 * len(files))
+    from manhwa.sfx import CATEGORIES
+
+    cats = [c for c in PROMPTS if c in CATEGORIES]
+    vecs = embed_audio([folder / "takes" / r["file"] for r in rows])
+    text = embed_texts([PROMPTS[c] for c in cats] + REJECT)
+    sims = vecs @ text.T
+    keep = []
+    for r, s in zip(rows, sims):
+        good = s[:len(cats)].copy()
+        hint = _hint(r["src"])
+        if hint in cats:
+            good[cats.index(hint)] += 0.05
+        best = int(good.argmax())
+        if r["user_cat"] in CATEGORIES:  # rangé à la main dans sfx/<catégorie>/ : on respecte
+            r["cat"] = r["user_cat"]
+        elif good[best] < s[len(cats):].max() or good[best] < 0.15:
+            r["cat"] = None  # musique, voix, moteur… : écarté
+        else:
+            r["cat"] = cats[best]
+        r["score"] = round(float(good[best]), 3)
+        keep.append(r)
+    np.save(folder / "vectors.npy", vecs.astype(np.float16))
+    (folder / "index.json").write_text(json.dumps({"version": BANK_VERSION, "takes": keep}, ensure_ascii=False),
+                                       encoding="utf-8")
+    close()
+    if progress:
+        progress(1, 1)
+    _BANK.clear()
+    return sum(1 for r in keep if r["cat"])
+
+
+_BANK = {}
+
+
+def bank():
+    """{"takes": [...], "vectors": np.array} (vide si la bibliothèque n'est pas prête)."""
+    if not _BANK:
+        try:
+            index = json.loads((bank_dir() / "index.json").read_text(encoding="utf-8"))
+            _BANK.update(takes=index["takes"], vectors=np.load(bank_dir() / "vectors.npy").astype(np.float32))
+        except (OSError, ValueError, KeyError):
+            _BANK.update(takes=[], vectors=np.zeros((0, 512), np.float32))
+    return _BANK
+
+
+def ready():
+    return bool(bank()["takes"])
+
+
+def _rows(category):
+    rows = [i for i, r in enumerate(bank()["takes"]) if r["cat"] == category and (r["score"] >= MIN_SCORE or r["user_cat"])]
+    return rows if len(rows) >= MIN_TAKES else []
+
+
+def files(category):
+    b = bank()
+    return [bank_dir() / "takes" / b["takes"][i]["file"] for i in _rows(category)]
+
+
+def best(category, query=None, seed=""):
+    """La prise de la catégorie la plus proche de la phrase (vecteur CLAP) ; sans phrase, au hasard (stable)."""
+    b = bank()
+    rows = _rows(category)
+    if not rows:
+        return None
+    if query is None:
+        k = int(hashlib.sha1(seed.encode("utf-8")).hexdigest(), 16) % len(rows)
+        return bank_dir() / "takes" / b["takes"][rows[k]]["file"]
+    sims = b["vectors"][rows] @ np.asarray(query, np.float32)
+    top = np.argsort(-sims)[:3]  # parmi les 3 plus proches : deux cases pareilles n'ont pas toujours le même son
+    k = top[int(hashlib.sha1(seed.encode("utf-8")).hexdigest(), 16) % len(top)] if seed else top[0]
+    return bank_dir() / "takes" / b["takes"][rows[k]]["file"]
+
+
+if __name__ == "__main__":
+    n = prepare(lambda d, t: print(f"{d}/{t}", end="\r", flush=True))
+    print(f"\n{n} prises rangées dans {bank_dir()}")

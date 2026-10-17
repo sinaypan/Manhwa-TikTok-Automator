@@ -12,7 +12,7 @@ const JOB_STEPS = [
   ['listen', 'Réécoute de la voix'],
 ];
 // étape d'un travail → case de la barre d'avancement (Pages, Découpe, Texte, Voix, Vidéo)
-const STEP_BAR = { frames: 1, ocr: 2, textfix: 2, faces: 2, scene: 2, wiki: 2, review: 2, voices: 2, sounds: 2, pilot: 2, tts: 3, render: 4, listen: 4, parts: 4 };
+const STEP_BAR = { frames: 1, ocr: 2, textfix: 2, faces: 2, scene: 2, describe: 2, wiki: 2, review: 2, voices: 2, sounds: 2, pilot: 2, tts: 3, render: 4, listen: 4, parts: 4 };
 const KIND_STEPS = {
   faces: [['faces', 'Recherche des visages']],
   wiki: [['wiki', 'Lecture du wiki']],
@@ -23,7 +23,12 @@ const KIND_STEPS = {
 };
 KIND_STEPS.review = [['review', 'Relecture GPT']];
 KIND_STEPS.voices = [['voices', 'Choix des voix']];
-KIND_STEPS.sounds = [['sounds', 'Sons des cases sans texte']];
+KIND_STEPS.sounds = [['sounds', 'Choix des sons (GPT)']];
+KIND_STEPS.understand = [
+  ['scene', 'Ce que montrent les cases'],
+  ['describe', 'Ce qui se passe dans les cases'],
+  ['sounds', 'Choix des sons (GPT)'],
+];
 KIND_STEPS.scene = [['scene', 'Ce que montrent les cases']];
 const AUTO_STEPS = [
   ['frames', 'Frames 9:16'],
@@ -31,6 +36,7 @@ const AUTO_STEPS = [
   ['textfix', 'Correction du texte'],
   ['faces', 'Visages'],
   ['scene', 'Ce que montrent les cases'],
+  ['describe', 'Ce qui se passe dans les cases'],
   ['wiki', 'Wiki'],
   ['review', 'Relecture GPT'],
   ['voices', 'Choix des voix'],
@@ -43,7 +49,7 @@ const AUTO_STEPS = [
 ];
 KIND_STEPS.listen = [['listen', 'Réécoute de la voix']];
 KIND_STEPS.parts = [['parts', 'Découpe en parties']];
-const KIND_TITLES = { auto: 'Tout faire', faces: 'Recherche des personnages', wiki: 'Lecture du wiki', wiki_images: 'Images du wiki', review: 'Relecture par GPT', voices: 'Choix des voix par GPT', sounds: 'Sons proposés par GPT', scene: 'Ce que montrent les cases' };
+const KIND_TITLES = { auto: 'Tout faire', faces: 'Recherche des personnages', wiki: 'Lecture du wiki', wiki_images: 'Images du wiki', review: 'Relecture par GPT', voices: 'Choix des voix par GPT', sounds: 'Sons proposés par GPT', scene: 'Ce que montrent les cases', understand: 'Comprendre les cases' };
 const SCREENS = [
   ['cut', 'Découpe'],
   ['cast', 'Personnages'],
@@ -75,7 +81,7 @@ const ICONS = {
 
 const $ = (sel, root = document) => root.querySelector(sel);
 // replaceChildren écrit « null » pour un enfant vide : on les retire d'abord
-const fill = (node, ...children) => node.replaceChildren(...children.flat().filter((c) => c != null && c !== false));
+const fill = (node, ...children) => node.replaceChildren(...children.flat(Infinity).filter((c) => c != null && c !== false));
 const enc = encodeURIComponent;
 const fmt = (n) => n.toLocaleString('fr-FR', { maximumFractionDigits: 1 });
 const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
@@ -90,7 +96,7 @@ function el(tag, attrs = {}, ...children) {
     else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
     else node.setAttribute(key, value === true ? '' : value);
   }
-  node.append(...children.flat().filter((c) => c != null && c !== false));
+  node.append(...children.flat(Infinity).filter((c) => c != null && c !== false));
   return node;
 }
 
@@ -127,33 +133,88 @@ function toast(message, action) {
 /* ---------- À faire, puis déjà fait : ce qu'on vient de décider reste quelques secondes (on peut changer
    d'avis), puis se range tout en bas ; la suivante prend sa place, sans avoir à défiler ---------- */
 
-const settleTimers = new Map();
+const settleTimers = new Map(); // clé → { stop }
+const SETTLE = 2; // secondes avant qu'une ligne décidée se range
+const pointer = { x: -1, y: -1 };
+let lastPress = null; // le bouton qu'on vient de cliquer : la suivante le mettra sous la souris
 
-function settle(key, seconds, done) {
-  clearTimeout(settleTimers.get(key));
+document.addEventListener('pointermove', (e) => Object.assign(pointer, { x: e.clientX, y: e.clientY }), { passive: true });
+document.addEventListener('pointerdown', (e) => {
+  Object.assign(pointer, { x: e.clientX, y: e.clientY });
+  const hit = e.target.closest?.('button, textarea, select');
+  const row = hit?.closest('[data-key]');
+  if (!row) return (lastPress = null);
+  const r = hit.getBoundingClientRect();
+  lastPress = { key: row.dataset.key, tag: hit.tagName, label: hit.tagName === 'BUTTON' ? hit.textContent.trim() : hit.className, dy: e.clientY - r.top };
+}, true);
+
+function sameControl(row, press) {
+  return [...row.querySelectorAll(press.tag)].find((b) => (press.tag === 'BUTTON' ? b.textContent.trim() : b.className) === press.label);
+}
+
+function alignUnderPointer(key, press) {
+  // la ligne suivante : son bouton « C'est bon » (ou le même nom, le même champ) vient sous la souris
+  const row = document.querySelector(`.queue > [data-key="${CSS.escape(key)}"]`);
+  const same = row && sameControl(row, press);
+  if (!same) return;
+  const r = same.getBoundingClientRect();
+  $('main')?.scrollBy(0, r.top + Math.min(press.dy, r.height - 2) - pointer.y);
+}
+
+function settle(key, seconds, done, { collapse = true } = {}) {
+  unsettle(key);
   const find = () => document.querySelector(`.queue > [data-key="${CSS.escape(key)}"]`);
   const row = find();
   if (!row) return;
   row.style.setProperty('--settle', `${seconds}s`);
-  row.classList.remove('settling');
+  row.classList.remove('settling', 'held');
   void row.offsetWidth;
   row.classList.add('settling');
-  settleTimers.set(
-    key,
+  const press = lastPress?.key === key ? lastPress : null;
+  // la souris qui bouge sur la ligne la retient (on relit, on corrige) ; immobile sur le bouton, elle part
+  const origin = { ...pointer };
+  const ac = new AbortController();
+  let left = seconds * 1000;
+  let start = 0;
+  let timer = null;
+  const run = () => {
+    row.classList.remove('held');
+    start = performance.now();
+    timer = setTimeout(finish, left);
+  };
+  const hold = () => {
+    if (timer == null) return;
+    clearTimeout(timer);
+    timer = null;
+    left = Math.max(1000, left - (performance.now() - start));
+    row.classList.add('held');
+  };
+  const finish = () => {
+    unsettle(key);
+    const live = find();
+    if (!live || !collapse) return done();
+    const next = live.nextElementSibling?.dataset.key || live.previousElementSibling?.dataset.key;
+    const queue = live.closest('.queue');
+    const aim = press && next && queue?.contains(document.elementFromPoint(pointer.x, pointer.y)) ? press : null;
+    live.style.height = `${live.offsetHeight}px`;
+    void live.offsetWidth;
+    live.classList.add('leaving');
     setTimeout(() => {
-      settleTimers.delete(key);
-      const live = find();
-      if (!live) return done();
-      live.style.height = `${live.offsetHeight}px`;
-      void live.offsetWidth;
-      live.classList.add('leaving');
-      setTimeout(done, 300);
-    }, seconds * 1000),
-  );
+      done();
+      if (aim) alignUnderPointer(next, aim);
+    }, 300);
+  };
+  row.addEventListener('pointermove', (e) => {
+    if (Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > 12) hold();
+  }, { signal: ac.signal });
+  row.addEventListener('pointerleave', () => timer == null && run(), { signal: ac.signal });
+  row.addEventListener('focusin', (e) => e.target.matches('textarea, select') && hold(), { signal: ac.signal });
+  settleTimers.set(key, { stop: () => (clearTimeout(timer), ac.abort()) });
+  run();
 }
 
 function unsettle(key) {
-  clearTimeout(settleTimers.get(key));
+  settleTimers.get(key)?.stop();
   settleTimers.delete(key);
 }
 
@@ -195,8 +256,10 @@ const state = {
   screen: 'cut', // 'cut' (Découpe) ou 'cast' (Personnages)
   cast: null, // détail renvoyé par /api/cast
   sel: new Set(), // visages sélectionnés (à ranger)
-  pendingKeys: new Set(), // répliques encore à valider (une validée y reste 5 s, puis se range en bas)
-  soundKeys: new Set(), // sons encore à choisir (même principe, 3 s)
+  pendingKeys: new Set(), // répliques encore à valider (une validée y reste 2 s, puis se range en bas)
+  soundKeys: new Set(), // sons encore à choisir (même principe)
+  soundFocus: null, // la case affichée en grand dans Sons (sinon la première à choisir)
+  soundLib: false, // « Tous les sons… » ouvert
   openDone: new Set(), // listes « déjà faits » et blocs repliables ouverts
   openFaces: new Set(), // personnages dont on voit tous les visages
   autoScene: new Set(), // chapitres dont on a déjà lancé « ce que montrent les cases » tout seul
@@ -408,7 +471,11 @@ function videoButton(running) {
   const p = findEpisode(state.chapter.id)?.progress || state.chapter.progress;
   const upToDate = p && p.done === p.total;
   const stale = p?.video && !upToDate;
-  if (running) return el('button', { type: 'button', class: 'pill accent', disabled: true }, el('span', { class: 'spinner light' }), 'En cours…');
+  if (running) {
+    const job = findEpisode(state.chapter.id)?.job || state.chapter.job;
+    const pct = job?.progress != null && job.status === 'running' ? ` ${Math.round(job.progress * 100)} %` : '';
+    return el('button', { type: 'button', class: 'pill accent', disabled: true, title: 'L’avancement détaillé est dans le bandeau en bas à droite' }, el('span', { class: 'spinner light' }), `En cours…${pct}`);
+  }
   if (upToDate) return el('button', { type: 'button', class: 'pill', title: 'La vidéo contient tous tes changements', onclick: () => switchScreen('video') }, icon('check'), 'Vidéo à jour');
   return el(
     'button',
@@ -421,6 +488,7 @@ function videoButton(running) {
 function renderHead() {
   const ch = state.chapter;
   const head = $('#head');
+  renderDock();
   if (!head) return;
   const job = findEpisode(ch.id)?.job || ch.job;
   const running = isRunning(job);
@@ -685,6 +753,70 @@ function jobCard(job) {
       }),
     ),
   );
+}
+
+/* ---------- Bandeau d'avancement : visible sur tous les onglets ---------- */
+
+const dock = { open: false, done: null, doneTimer: null }; // done : le travail qui vient de finir (« Vidéo prête »)
+
+function dockJob() {
+  // le travail du chapitre ouvert d'abord, sinon celui d'un autre chapitre qui tourne
+  const here = state.current && findEpisode(state.current)?.job;
+  if (here && (isRunning(here) || here.status === 'error')) return { job: here, id: state.current };
+  for (const s of state.library?.series || []) for (const c of s.chapters) if (isRunning(c.job)) return { job: c.job, id: c.id };
+  return null;
+}
+
+function renderDock() {
+  let box = $('#job-dock');
+  if (!box) {
+    box = el('div', { id: 'job-dock', hidden: true });
+    document.body.append(box);
+  }
+  const found = dockJob();
+  const cardOnScreen = document.getElementById('job-card'); // la même carte est déjà à l'écran (Découpe…)
+  if (dock.done && !found) {
+    const { id, title } = dock.done;
+    box.hidden = false;
+    box.className = 'done';
+    fill(box,
+      el('div', { class: 'dock-line' }, icon('check'), el('b', { text: title }),
+        el('button', { type: 'button', class: 'pill accent', onclick: () => { dock.done = null; renderDock(); id === state.current ? switchScreen('video') : (location.hash = `#${enc(id)}/video`); } }, 'Voir'),
+        el('button', { type: 'button', class: 'link quiet', 'aria-label': 'Fermer', onclick: () => { dock.done = null; renderDock(); } }, icon('x'))));
+    return;
+  }
+  if (!found || (cardOnScreen && found.id === state.current)) {
+    box.hidden = true;
+    return;
+  }
+  const { job, id } = found;
+  const steps = job.kind === 'auto' ? AUTO_STEPS : KIND_STEPS[job.kind] || JOB_STEPS;
+  const at = steps.findIndex(([step]) => step === job.step);
+  const name = id === state.current ? '' : `${id.split('/')[0]} · ${(id.split('/')[1] || '').replace('chapter-', 'Ép. ')} — `;
+  const pct = job.progress != null ? ` · ${Math.round(job.progress * 100)} %` : '';
+  box.hidden = false;
+  box.className = job.status === 'error' ? 'error' : '';
+  fill(box,
+    el('button', { type: 'button', class: 'dock-line', title: dock.open ? 'Replier' : 'Voir toutes les étapes', onclick: () => { dock.open = !dock.open; renderDock(); } },
+      job.status === 'error' ? icon('alert') : el('span', { class: 'spinner' }),
+      el('span', { class: 'grow' },
+        el('b', { text: `${name}${job.status === 'error' ? 'Erreur' : job.status === 'queued' ? 'En attente…' : KIND_TITLES[job.kind] || 'Création de la vidéo'}` }),
+        el('span', { class: 'muted', text: job.status === 'running' && at >= 0 ? ` · ${at + 1}/${steps.length} ${steps[at][1]}${pct}${remaining(job)}` : '' })),
+      icon(dock.open ? 'down' : 'plus')),
+    job.progress != null && job.status === 'running' ? el('div', { class: 'bar' }, el('span', { style: `width:${job.progress * 100}%` })) : null,
+    dock.open ? jobCard(job) : null);
+  if (dock.open) box.querySelector('#job-card')?.removeAttribute('id'); // une seule « vraie » carte à mettre à jour
+}
+
+function dockFinished(before, after, id) {
+  // un travail qui vient de finir : « Vidéo prête » (ou « Erreur ») reste affiché
+  if (!isRunning(before) || isRunning(after)) return;
+  if (after?.status === 'done' && ['make', 'auto'].includes(after.kind)) {
+    const ep = (id.split('/')[1] || '').replace('chapter-', 'épisode ');
+    dock.done = { id, title: `Vidéo prête · ${ep}` };
+    clearTimeout(dock.doneTimer);
+    dock.doneTimer = setTimeout(() => { dock.done = null; renderDock(); }, 60000);
+  }
 }
 
 /* ---------- Aperçu ---------- */
@@ -1476,7 +1608,7 @@ function linesSection() {
     el(
       'div',
       { class: 'block-head row' },
-      el('div', { class: 'grow' }, el('h3', { text: `Qui parle · ${queue.length} à valider` }), el('p', { class: 'muted', text: 'Clique sur la bonne tête, sur l’image ou dessous (en pointillés : la proposition). La réplique se range en bas au bout de 5 secondes et la suivante prend sa place : tu peux changer d’avis avant, ou plus tard dans « Déjà validées ».' })),
+      el('div', { class: 'grow' }, el('h3', { text: `Qui parle · ${queue.length} à valider` }), el('p', { class: 'muted', text: 'Clique sur la bonne tête, sur l’image ou dessous (en pointillés : la proposition). La réplique se range en bas au bout de 2 secondes (tant que ta souris bouge dessus, elle attend) et la suivante prend sa place : tu peux changer d’avis avant, ou plus tard dans « Déjà validées ».' })),
       el('div', { class: 'actions' }, proposals ? el('button', { type: 'button', class: 'pill accent', onclick: acceptProposals }, icon('check'), `Valider les ${proposals} propositions`) : null),
     ),
     el('div', { class: 'bar' }, el('span', { style: `width:${total ? (100 * done) / total : 0}%` })),
@@ -1557,7 +1689,7 @@ async function setSpeaker(l, cid) {
     renderHead();
     if (state.pendingKeys.has(l.key)) {
       if (fresh?.speaker)
-        settle(l.key, 5, () => {
+        settle(l.key, SETTLE, () => {
           state.pendingKeys.delete(l.key);
           afterSettle(l.key, linesSection());
         });
@@ -1853,6 +1985,7 @@ async function openReview() {
     if (state.chapter?.id !== id || state.screen !== 'review') return;
     state.review = r;
     renderReview();
+    if (state.reviewMode === 'all') await openBubbles();
     focusFrameRow();
   } catch (e) {
     $('#review').replaceChildren(el('div', { class: 'notice error' }, icon('alert'), el('p', { text: `Impossible d’ouvrir la relecture : ${e.message}` })));
@@ -1901,7 +2034,8 @@ async function openBubbles() {
     const res = await api(`/api/bubbles?id=${enc(id)}`);
     if (state.chapter?.id !== id) return;
     state.bubbles = res.bubbles;
-    state.bubbleKeys = new Set(res.bubbles.filter((b) => !b.checked).map((b) => b.key));
+    // filigranes, crédits, titres, numéros : repérés tout seuls et jamais lus, pas besoin de les vérifier
+    state.bubbleKeys = new Set(res.bubbles.filter((b) => !b.checked && !AUTO_KINDS[b.kind]).map((b) => b.key));
     renderReview();
   } catch (e) {
     toast(`Impossible : ${e.message}`);
@@ -1918,7 +2052,7 @@ function bubblesSection() {
     { class: 'cast-block', id: 'bubble-block' },
     el('div', { class: 'block-head' },
       el('h3', { text: `Toutes les bulles · ${queue.length} à vérifier` }),
-      el('p', { class: 'muted', text: 'Corrige le texte si la lecture s’est trompée, choisis le type (une pensée, un encadré de narration, un bruitage…), puis « C’est bon » (ou Entrée). La bulle se range en bas et la suivante arrive. Ce que tu vérifies ici sert aussi de référence pour mesurer la machine.' })),
+      el('p', { class: 'muted', text: 'Corrige le texte si la lecture s’est trompée, choisis le type (une pensée, un encadré de narration, un bruitage…), puis « C’est bon » (ou Entrée). La bulle se range en bas au bout de 2 secondes (tant que ta souris bouge dessus, elle attend) et la suivante arrive, son « C’est bon » sous ta souris. Ce que tu vérifies ici sert aussi de référence pour mesurer la machine.' })),
     el('div', { class: 'bar' }, el('span', { style: `width:${all.length ? (100 * rest.length) / all.length : 0}%` })),
     queue.length
       ? el('div', { class: 'lines queue', id: 'bubble-queue' }, queue.map(bubbleRow))
@@ -1926,6 +2060,8 @@ function bubblesSection() {
     doneList('bubble-done', `Déjà vérifiées · ${rest.length}`, rest.map(bubbleRow)),
   );
 }
+
+const AUTO_KINDS = { watermark: 'filigrane du site', credit: 'crédits', title: 'titre du chapitre', number: 'numéro', silent: 'ponctuation seule' };
 
 function bubbleRow(b) {
   const r = state.review;
@@ -1941,7 +2077,7 @@ function bubbleRow(b) {
   const kinds = el('div', { class: 'who-chips' },
     Object.entries(r.kinds).map(([k, label]) =>
       el('button', { type: 'button', class: `chip-btn plain${b.kind === k ? ' on' : ''}`, onclick: () => checkBubble(b, { kind: k, text: text.value }) }, label)),
-    r.kinds[b.kind] ? null : el('span', { class: 'chip', text: b.kind }));
+    r.kinds[b.kind] ? null : el('span', { class: 'chip', title: 'Repéré tout seul, jamais lu par la voix', text: AUTO_KINDS[b.kind] || b.kind }));
   return el(
     'div',
     { class: `line-row bubble-row${done ? ' done' : ''}`, 'data-key': b.key },
@@ -1952,7 +2088,7 @@ function bubbleRow(b) {
       kinds,
       el('div', { class: 'who-chips' },
         done
-          ? [el('span', { class: 'state-badge accepted' }, icon('check'), 'Vérifiée'),
+          ? [el('span', { class: 'state-badge accepted' }, icon('check'), b.checked ? 'Vérifiée' : 'Repérée toute seule'),
              el('button', { type: 'button', class: 'link quiet', onclick: () => checkBubble(b, { checked: false }) }, 'Remettre à vérifier')]
           : el('button', { type: 'button', class: 'pill accent', onclick: () => checkBubble(b, { text: text.value, checked: true }) }, icon('check'), 'C’est bon'))),
   );
@@ -1973,7 +2109,7 @@ async function checkBubble(b, changes) {
     const fresh = res.bubbles.find((x) => x.key === b.key);
     document.querySelector(`#bubble-block .line-row[data-key="${CSS.escape(b.key)}"]`)?.replaceWith(bubbleRow(fresh));
     if (changes.checked && state.bubbleKeys.has(b.key))
-      settle(b.key, 2, () => {
+      settle(b.key, SETTLE, () => {
         state.bubbleKeys.delete(b.key);
         afterSettle(b.key, bubblesSection());
         const tabs = $('.review-modes');
@@ -2091,11 +2227,30 @@ function reviewFocus(item, left) {
             el('button', { type: 'button', class: 'pill accent big', onclick: saveEdit }, icon('check'), 'Valider ma version', key('Entrée')),
           ]
         : [
+            el('button', { type: 'button', class: 'pill big', title: 'Ce n’est pas du texte (bruit, lettres du dessin) : la bulle n’est pas lue', onclick: () => notText(item) }, 'Pas du texte', key('N')),
             el('button', { type: 'button', class: 'pill big', onclick: () => decideOne(item, 'rejected') }, icon('x'), 'Refuser', key('R')),
             item.field === 'text' ? el('button', { type: 'button', class: 'pill big', onclick: () => editItem(item) }, icon('edit'), 'Corriger moi-même', key('E')) : null,
             el('button', { type: 'button', class: 'pill accent big', onclick: () => decideOne(item, 'accepted') }, icon('check'), 'Accepter', key('A')),
           ]),
   );
+}
+
+async function notText(item) {
+  // la bulle n'est pas du texte : elle n'est plus lue, et ses autres propositions tombent
+  const id = state.chapter.id;
+  try {
+    await api(`/api/bubbles/check?id=${enc(id)}`, { method: 'POST', body: JSON.stringify({ key: item.key, kind: 'noise', checked: true }) });
+    state.review = await api(`/api/review?id=${enc(id)}`);
+    state.bubbles = null;
+    renderReview();
+    toast(`« ${item.text.slice(0, 30)} » : pas du texte, plus lu`, { label: 'Annuler', run: async () => {
+      await api(`/api/bubbles/check?id=${enc(id)}`, { method: 'POST', body: JSON.stringify({ key: item.key, kind: item.field === 'kind' ? item.old : 'dialogue', checked: false }) });
+      state.review = await api(`/api/review?id=${enc(id)}`);
+      renderReview();
+    } });
+  } catch (e) {
+    toast(`Non enregistré : ${e.message}`);
+  }
 }
 
 function editItem(item) {
@@ -2185,6 +2340,7 @@ document.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   if (k === 'a' || k === 'enter') decideOne(item, 'accepted');
   else if (k === 'r') decideOne(item, 'rejected');
+  else if (k === 'n') notText(item);
   else if (k === 'e' && item.field === 'text') editItem(item);
   else return;
   e.preventDefault();
@@ -2283,8 +2439,13 @@ async function openSounds() {
   try {
     const s = await api(`/api/sounds?id=${enc(id)}`);
     if (state.chapter?.id !== id || state.screen !== 'sounds') return;
+    if (state.focusFrame) {
+      // venu d'ailleurs (« Corriger » depuis la vidéo) : la case visée, en grand
+      const hit = [...s.spots, ...s.actions].find((x) => x.frame === state.focusFrame);
+      state.soundFocus = hit?.key || null;
+      state.focusFrame = null;
+    }
     setSounds(s, true);
-    focusFrameRow();
   } catch (e) {
     $('#sounds').replaceChildren(el('div', { class: 'notice error' }, icon('alert'), el('p', { text: `Impossible d’ouvrir les sons : ${e.message}` })));
   }
@@ -2302,9 +2463,10 @@ function setSounds(s, fresh = false) {
   // première visite : on regarde ce que montrent les cases (en local, ≈ 15 s), sans clic à faire
   const id = state.chapter.id;
   const job = findEpisode(id)?.job || s.job;
-  if (!s.scene_done && s.ocr_done && !isRunning(job) && !state.autoScene.has(id)) {
+  if (s.ocr_done && !isRunning(job) && !state.autoScene.has(id) && (!s.scene_done || (!s.understood && s.gpt.configured))) {
     state.autoScene.add(id);
-    lookAtPanels();
+    if (s.gpt.configured && !s.understood) suggestSounds();
+    else lookAtPanels();
   }
   renderSounds();
 }
@@ -2346,85 +2508,163 @@ function renderSounds() {
   const s = state.sounds;
   if (!box || !s) return;
   renderHead();
-  const parts = [
-    el(
-      'div',
-      { class: 'card music-card' },
-      el('button', { type: 'button', class: 'play', 'aria-label': 'Écouter la musique', disabled: !s.music, onclick: (e) => playUrl(e.currentTarget, '/api/music') }, icon('play')),
-      el('div', { class: 'grow' },
-        el('b', { text: s.moods ? 'Musique selon l’ambiance : calme, tension, combat, tristesse' : s.music ? `Musique de fond : ${s.music}` : 'Pas de musique de fond' }),
-        el('p', { class: 'muted', text: s.moods
-          ? 'Elle change avec la scène (ce que montre l’image, le ton des répliques) et baisse quand on parle. Pour mettre tes morceaux : un MP3 dans music/calm/, music/tension/, music/combat/ ou music/sad/ (sinon une nappe générée, sans droits).'
-          : 'Elle tourne en boucle et baisse quand on parle. Pour la changer : dépose un MP3 dans le dossier music/ du projet (le premier par ordre alphabétique est pris), ou indique-le dans config.toml.' })),
-    ),
-  ];
+  const parts = [];
   const job = findEpisode(state.current)?.job || s.job;
-  if (['sounds', 'scene'].includes(job?.kind) && (isRunning(job) || job.status === 'error')) parts.push(jobCard(job));
-  if (!s.ocr_done) parts.push(el('div', { class: 'notice' }, icon('alert'), el('p', { text: 'Crée d’abord la vidéo : les bruitages sont repérés à la lecture du texte.' })));
-  else parts.push(soundsSection());
+  const busy = isRunning(job);
+  if (['sounds', 'scene', 'understand'].includes(job?.kind) && (busy || job.status === 'error')) parts.push(jobCard(job));
+  if (!s.ocr_done) {
+    parts.push(el('div', { class: 'notice' }, icon('alert'), el('p', { text: 'Crée d’abord la vidéo : les bruitages sont repérés à la lecture du texte.' })));
+    return box.replaceChildren(...parts);
+  }
+  if (!s.understood && !busy)
+    parts.push(el('div', { class: 'notice' }, icon('sparkles'),
+      el('p', { class: 'grow', text: s.gpt.configured
+        ? `Je peux regarder ce qui se passe dans chaque case (${s.vision === 'local' ? 'en local, ≈ 10 min pour un épisode' : 'avec GPT'}), puis choisir les sons d’après l’histoire : un coup contre un mur, une lame qu’on dégaine, du sang…`
+        : 'Pour des sons choisis d’après ce qui se passe dans chaque case, colle la clé GPT (Réglages). En attendant : d’après ce que montre l’image.' }),
+      s.gpt.configured ? el('button', { type: 'button', class: 'pill accent', onclick: suggestSounds }, icon('sparkles'), 'Comprendre les cases') : null));
+  parts.push(soundStrip(), soundStage(), musicCard(s));
   box.replaceChildren(...parts);
+  $('#sound-strip .on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
 
-function soundsSection() {
-  const s = state.sounds;
-  const all = soundItems();
-  const queue = all.filter((x) => state.soundKeys.has(x.key));
-  const rest = all.filter((x) => !state.soundKeys.has(x.key));
-  const withSound = queue.filter((x) => x.proposed !== s.none).length;
-  const busy = isRunning(findEpisode(state.current)?.job || s.job);
+function musicCard(s) {
   return el(
-    'section',
-    { class: 'cast-block', id: 'sound-block' },
-    el('div', { class: 'block-head row' },
-      el('div', { class: 'grow' },
-        el('h3', { text: `À sonoriser · ${queue.length}` }),
-        el('p', { class: 'muted', text: s.scene_done
-          ? 'Pour chaque bruitage dessiné et chaque case sans texte, je regarde l’image et je propose 3 sons (« je vois : du feu »). Le son en pointillés est déjà dans la vidéo tant que tu ne choisis pas. Clique sur un son : il se joue et il est choisi ; la case se range en bas au bout de 3 secondes.'
-          : 'Je regarde d’abord ce que montrent les cases pour te proposer les bons sons…' })),
-      el('div', { class: 'actions' },
-        s.gpt.configured ? el('button', { type: 'button', class: 'pill', disabled: busy, title: 'GPT lit les répliques autour des cases sans texte et propose un son', onclick: suggestSounds }, icon('sparkles'), 'Demander aussi à GPT') : null,
-        queue.length ? el('button', { type: 'button', class: 'pill accent', title: `${withSound} avec un son, ${queue.length - withSound} sans`, onclick: () => acceptActions(queue) }, icon('check'), `Valider les ${queue.length} propositions`) : null)),
-    queue.length
-      ? el('div', { class: 'lines queue', id: 'sound-queue' }, queue.map(soundRow))
-      : el('div', { class: 'notice queue-empty' }, icon('check'), el('p', { text: 'Tout a son son (ou rien). Pour changer d’avis : « Déjà choisis », juste dessous.' })),
-    doneList('sound-done', `Déjà choisis · ${rest.filter((x) => x.sound !== s.none).length} avec un son, ${rest.filter((x) => x.sound === s.none).length} sans`, rest.map(soundRow)),
+    'div',
+    { class: 'card music-card' },
+    el('button', { type: 'button', class: 'play', 'aria-label': 'Écouter la musique', disabled: !s.music, onclick: (e) => playUrl(e.currentTarget, '/api/music') }, icon('play')),
+    el('div', { class: 'grow' },
+      el('b', { text: s.moods ? 'Musique selon l’ambiance : calme, tension, combat, tristesse' : s.music ? `Musique de fond : ${s.music}` : 'Pas de musique de fond' }),
+      el('p', { class: 'muted', text: s.moods
+        ? 'Elle change avec la scène et baisse quand on parle. Tes morceaux : un MP3 dans music/calm/, music/tension/, music/combat/ ou music/sad/.'
+        : 'Elle tourne en boucle et baisse quand on parle. Pour la changer : un MP3 dans le dossier music/ du projet.' })),
   );
 }
 
-function soundRow(spot) {
+const soundName = (value) => {
   const s = state.sounds;
-  const [, , w, ch] = spot.crop;
-  // une bulle : autour d'elle ; une case sans texte : la case entière (pas plus haute qu'un écran)
-  const h = Math.min(ch, Math.round((spot.box ? 0.6 : 1.4) * w));
-  const cy = spot.box ? spot.box[1] + spot.box[3] / 2 : ch / 2;
-  const view = [0, Math.max(0, Math.min(ch - h, Math.round(cy - h / 2))), w, h];
-  const picked = spot.chosen || !state.soundKeys.has(spot.key);
-  const cats = [...new Set([...spot.recs, ...(picked && spot.sound !== s.none ? [spot.sound] : [])])];
-  const chip = (cat, label) =>
-    el(
-      'button',
-      { type: 'button', class: `chip-btn plain${picked && spot.sound === cat ? ' on' : ''}${!picked && spot.proposed === cat ? ' proposed' : ''}`, title: cat === s.none ? '' : 'Écouter et choisir', onclick: () => chooseSound(spot, cat) },
-      cat === s.none ? null : icon('play'),
-      label,
-    );
-  const others = Object.keys(s.categories).filter((c) => !cats.includes(c));
-  const marks = spot.box ? [['bubble-box', spot.box]] : [];
+  const layers = String(value || '').split('+').filter((c) => s.categories[c]);
+  return layers.length ? layers.map((c) => s.categories[c]).join(' + ') : 'Aucun son';
+};
+
+function soundCurrent() {
+  // la case affichée : celle qu'on a ouverte, sinon la première à choisir
+  const items = soundItems();
+  const focus = items.find((x) => x.key === state.soundFocus);
+  return focus || items.find((x) => state.soundKeys.has(x.key)) || null;
+}
+
+function soundStrip() {
+  // la bande-son de l'épisode : chaque case qui peut avoir un son, dans l'ordre ; un clic l'ouvre
+  const s = state.sounds;
+  const items = soundItems();
+  const current = soundCurrent();
   return el(
     'div',
-    { class: 'line-row sound-row', 'data-key': spot.key },
-    el('div', { class: 'shot', style: `aspect-ratio:${view[2]}/${view[3]}`, onmouseenter: (e) => showContext(e.currentTarget, spot.crop, marks.length ? marks : [['frame-box', [0, 0, w, ch]]]), onmouseleave: hidePeek },
-      el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(spot.frame)}&y=${view[1]}&h=${view[3]}`, alt: '', loading: 'lazy' }),
-      spot.box ? el('span', { class: 'bubble-box', style: boxStyle(spot.box, view) }) : null),
-    el('div', { class: 'line-body' },
-      el('p', { class: 'quote', text: spot.text ? `Bruitage dessiné « ${spot.text} »` : `Case ${spot.index + 1} · personne ne parle` }),
-      spot.seen.length ? el('p', { class: 'seen' }, icon('eye'), `Je vois : ${spot.seen.join(', ')}`) : s.scene_done ? el('p', { class: 'muted', text: 'Rien de bruyant sur l’image.' }) : null,
-      spot.reason ? el('p', { class: 'muted', text: `GPT : ${spot.reason}` }) : null,
-      el('div', { class: 'who-chips' },
-        cats.map((c) => chip(c, s.categories[c])),
-        chip(s.none, 'Aucun son'),
-        el('select', { class: 'chip-btn', 'aria-label': 'Un autre son', onchange: (e) => { const v = e.target.value; e.target.value = ''; if (v) chooseSound(spot, v); } },
-          el('option', { value: '', text: 'Autre son…' }),
-          others.map((c) => el('option', { value: c, text: s.categories[c] }))))),
+    { class: 'card strip-card' },
+    el('div', { class: 'focus-head' },
+      el('b', { text: 'La bande-son de l’épisode' }),
+      el('span', { class: 'muted grow', text: `${items.length - state.soundKeys.size} / ${items.length} choisis · ${items.filter((x) => (state.soundKeys.has(x.key) ? x.proposed : x.sound) !== s.none).length} avec un son` }),
+      el('span', { class: 'legend' }, el('i', { class: 'todo' }), 'à choisir', el('i', { class: 'done' }), 'choisi', el('i', { class: 'none' }), 'sans son')),
+    el('div', { class: 'sound-strip', id: 'sound-strip' },
+      items.map((x) => {
+        const todo = state.soundKeys.has(x.key) && !x.chosen;
+        const value = todo ? x.proposed : x.sound;
+        const [, , w, ch] = x.crop;
+        const h = Math.min(ch, Math.round(1.3 * w));
+        const cy = x.box ? x.box[1] + x.box[3] / 2 : ch / 2;
+        const y = Math.max(0, Math.min(ch - h, Math.round(cy - h / 2)));
+        return el('button', {
+          type: 'button',
+          class: `strip-item ${todo ? 'todo' : value === s.none ? 'none' : 'done'}${current?.key === x.key ? ' on' : ''}`,
+          title: `${x.text ? `« ${x.text} »` : `Case ${x.index + 1}`} : ${soundName(value)}${todo ? ' (proposé)' : ''}`,
+          onclick: () => {
+            const here = soundCurrent();
+            if (here && settleTimers.has(here.key)) {
+              unsettle(here.key);
+              state.soundKeys.delete(here.key);
+            }
+            state.soundFocus = x.key;
+            state.soundLib = false;
+            renderSounds();
+          },
+        },
+          el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(x.frame)}&y=${y}&h=${h}&w=120`, alt: '', loading: 'lazy' }),
+          el('span', { text: value === s.none ? '—' : soundName(value).split(' + ').map((n) => n.split(/[ ,]/)[0]).join(' + ') }));
+      })),
+  );
+}
+
+function soundStage() {
+  const s = state.sounds;
+  const item = soundCurrent();
+  if (!item)
+    return el('div', { class: 'notice queue-empty' }, icon('check'),
+      el('p', { text: 'Toutes les cases ont leur son (ou rien). Pour changer d’avis : clique sur une case dans la bande-son.' }));
+  return el('div', { class: 'queue', id: 'sound-queue' }, soundFocusCard(item));
+}
+
+function soundFocusCard(item) {
+  const s = state.sounds;
+  const todo = state.soundKeys.has(item.key) && !item.chosen;
+  const leaving = state.soundKeys.has(item.key) && item.chosen; // choisi à l'instant : la suivante arrive
+  const value = todo ? item.proposed : item.sound;
+  const layers = value === s.none ? [] : value.split('+');
+  const left = state.soundKeys.size;
+  const [, , w, ch] = item.crop;
+  const h = Math.min(ch, Math.round((item.box ? 1.0 : 1.6) * w));
+  const cy = item.box ? item.box[1] + item.box[3] / 2 : ch / 2;
+  const view = [0, Math.max(0, Math.min(ch - h, Math.round(cy - h / 2))), w, h];
+  const seed = item.text || item.frame;
+  const key = (k) => el('kbd', { text: k });
+  const ideas = [...new Set([...item.recs, ...(todo ? [] : layers)])].filter((c) => !layers.includes(c)).slice(0, 4);
+  const chip = (cat) =>
+    el('span', { class: 'chip-pair' },
+      el('button', { type: 'button', class: 'chip-btn plain', title: 'Écouter et choisir ce son', onclick: () => chooseSound(item, cat) }, icon('play'), s.categories[cat]),
+      layers.length === 1 && layers[0] !== cat
+        ? el('button', { type: 'button', class: 'chip-btn plain add', title: `Les deux : ${s.categories[layers[0]]} + ${s.categories[cat]}`, onclick: () => chooseSound(item, `${layers[0]}+${cat}`) }, '+')
+        : null);
+  return el(
+    'div',
+    { class: 'card review-focus sound-focus', 'data-key': item.key },
+    el('div', { class: 'focus-head' },
+      el('span', { class: 'chip', text: `Case ${item.index + 1}` }),
+      el('span', { class: 'chip', text: item.text ? `bruitage dessiné « ${item.text} »` : 'personne ne parle' }),
+      el('span', { class: 'muted grow', text: todo || leaving ? `${plural(left, 'case', 'cases')} à choisir` : 'Déjà choisi : tu peux changer d’avis' }),
+      todo && left > 1
+        ? el('button', { type: 'button', class: 'link quiet', title: 'Garder toutes les propositions telles quelles', onclick: () => acceptActions(soundItems().filter((x) => state.soundKeys.has(x.key))) }, `Tout accepter (${left})`)
+        : null),
+    el('div', { class: 'focus-body' },
+      el('div', { class: 'shot', style: `aspect-ratio:${view[2]}/${view[3]}`, onmouseenter: (e) => showContext(e.currentTarget, item.crop, item.box ? [['bubble-box', item.box]] : [['frame-box', [0, 0, w, ch]]]), onmouseleave: hidePeek },
+        el('img', { src: `/api/crop?id=${enc(state.chapter.id)}&frame=${enc(item.frame)}&y=${view[1]}&h=${view[3]}&w=720`, alt: '' }),
+        item.box ? el('span', { class: 'bubble-box', style: boxStyle(item.box, view) }) : null),
+      el('div', { class: 'line-body' },
+        el('p', { class: 'muted small', text: 'Ce qui se passe' }),
+        el('p', { class: 'quote', text: item.what || (item.seen.length ? `Je vois : ${item.seen.join(', ')}` : s.scene_done ? 'Rien de bruyant sur l’image.' : '…') }),
+        el('div', { class: `proposal${todo ? '' : ' mine'}` },
+          el('p', { class: 'muted small', text: todo ? 'Proposé' : 'Ton choix' }),
+          el('button', { type: 'button', class: 'proposal-sound', disabled: !layers.length, title: 'Écouter ce son seul', onclick: (e) => playUrl(e.currentTarget, `/api/sfx_sample?cat=${enc(value)}&text=${enc(seed)}&id=${enc(state.chapter.id)}&key=${enc(item.key)}`) },
+            layers.length ? icon('play') : null, el('b', { text: soundName(value) })),
+          todo && item.why ? el('p', { class: 'muted', text: item.why }) : null,
+          layers.length && item.strength ? el('p', { class: 'muted small', text: `Volume : ${{ 1: 'doux', 2: 'normal', 3: 'fort' }[item.strength]}, selon la force du moment` }) : null),
+        ideas.length ? el('p', { class: 'muted small', text: layers.length === 1 ? 'Ou plutôt (+ pour mettre les deux)' : 'Ou plutôt' }) : null,
+        el('div', { class: 'who-chips' }, ideas.map(chip)),
+        el('button', { type: 'button', class: 'link quiet', onclick: () => { state.soundLib = !state.soundLib; renderSounds(); } },
+          icon(state.soundLib ? 'down' : 'plus'), state.soundLib ? 'Fermer la bibliothèque' : 'Tous les sons…'),
+        state.soundLib
+          ? el('div', { class: 'sound-library' },
+              s.families.map(([name, cats]) => el('div', { class: 'family' },
+                el('span', { class: 'muted small', text: name }),
+                el('div', { class: 'who-chips' }, cats.filter((c) => s.categories[c]).map(chip)))))
+          : null)),
+    el('div', { class: 'focus-actions' },
+      el('button', { type: 'button', class: 'pill big', title: 'Pas de bruitage sur cette case', onclick: () => chooseSound(item, s.none) }, 'Aucun son', key('N')),
+      el('button', { type: 'button', class: 'pill big', disabled: !item.frame, title: 'La voix de la case et ce son, comme dans la vidéo', onclick: (e) => playUrl(e.currentTarget, `/api/sounds/preview?id=${enc(state.chapter.id)}&frame=${enc(item.frame)}&sound=${enc(value)}&seed=${enc(seed)}&key=${enc(item.key)}`) },
+        icon('play'), 'Écouter avec la voix', key('Espace')),
+      todo
+        ? el('button', { type: 'button', class: 'pill accent big', onclick: () => chooseSound(item, value, { listen: false }) }, icon('check'), value === s.none ? 'Valider : aucun son' : 'Valider', key('Entrée'))
+        : leaving
+          ? el('button', { type: 'button', class: 'pill accent big', disabled: true }, icon('check'), 'Choisi')
+          : el('button', { type: 'button', class: 'pill big', onclick: () => resetSound(item) }, 'Remettre à choisir')),
   );
 }
 
@@ -2432,27 +2672,79 @@ async function sendSounds(choices) {
   state.sounds = await api(`/api/sounds?id=${enc(state.chapter.id)}`, { method: 'POST', body: JSON.stringify({ choices }) });
 }
 
-async function chooseSound(spot, cat) {
-  if (cat !== state.sounds.none) playUrl(null, `/api/sfx_sample?cat=${enc(cat)}&text=${enc(spot.text || spot.frame)}`);
+async function chooseSound(item, value, { listen = true } = {}) {
+  // le son est choisi tout de suite ; la case suivante arrive au bout de 2 s (la souris qui bouge dessus la retient)
+  const s = state.sounds;
+  if (listen && value !== s.none) playUrl(null, `/api/sfx_sample?cat=${enc(value)}&text=${enc(item.text || item.frame)}&id=${enc(state.chapter.id)}&key=${enc(item.key)}`);
+  const wasTodo = state.soundKeys.has(item.key);
   try {
-    await sendSounds([{ key: spot.key, sound: cat }]);
-    const fresh = [...state.sounds.spots, ...state.sounds.actions].find((x) => x.key === spot.key);
-    if (fresh) document.querySelector(`#sounds .line-row[data-key="${CSS.escape(spot.key)}"]`)?.replaceWith(soundRow(fresh));
+    await sendSounds([{ key: item.key, sound: value }]);
+    state.soundFocus = item.key;
+    renderSounds();
     renderHead();
-    if (state.soundKeys.has(spot.key))
-      settle(spot.key, 3, () => {
-        state.soundKeys.delete(spot.key);
-        afterSettle(spot.key, soundsSection());
-      });
+    if (wasTodo)
+      settle(item.key, SETTLE, () => {
+        state.soundKeys.delete(item.key);
+        const next = soundItems().find((x) => state.soundKeys.has(x.key) && x.key !== item.key);
+        state.soundFocus = next?.key || null;
+        state.soundLib = false;
+        renderSounds();
+      }, { collapse: false });
   } catch (e) {
     toast(`Non enregistré : ${e.message}`);
   }
 }
 
+async function resetSound(item) {
+  try {
+    await sendSounds([{ key: item.key, sound: null }]);
+    state.soundKeys.add(item.key);
+    state.soundFocus = item.key;
+    renderSounds();
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
+  }
+}
+
+function stepSound(delta) {
+  const items = soundItems();
+  const at = items.indexOf(soundCurrent());
+  const next = items[Math.max(0, Math.min(items.length - 1, at + delta))];
+  if (!next) return;
+  const here = soundCurrent();
+  if (here && settleTimers.has(here.key)) {
+    unsettle(here.key); // on part avant la fin des 2 s : le choix est gardé
+    state.soundKeys.delete(here.key);
+  }
+  state.soundFocus = next.key;
+  state.soundLib = false;
+  renderSounds();
+}
+
+document.addEventListener('keydown', (e) => {
+  // sons au clavier : Entrée valider, N aucun son, Espace écouter avec la voix, ← → case d'avant / d'après
+  if (state.screen !== 'sounds' || !state.sounds || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest?.('input, textarea, select')) return;
+  const item = soundCurrent();
+  if (!item) return;
+  const card = $('.sound-focus');
+  const k = e.key.toLowerCase();
+  if (k === 'enter' || k === 'a') {
+    e.preventDefault();
+    if (state.soundKeys.has(item.key) && !item.chosen) chooseSound(item, item.proposed, { listen: false });
+  } else if (k === 'n') chooseSound(item, state.sounds.none);
+  else if (k === ' ') {
+    e.preventDefault();
+    card?.querySelector('.focus-actions .pill:nth-child(2)')?.click();
+  } else if (k === 'arrowright') stepSound(1);
+  else if (k === 'arrowleft') stepSound(-1);
+});
+
 async function acceptActions(items) {
   try {
     await sendSounds(items.map((x) => ({ key: x.key, sound: x.proposed })));
     for (const x of items) state.soundKeys.delete(x.key);
+    state.soundFocus = null;
     renderSounds();
     toast(`${plural(items.length, 'case validée', 'cases validées')} (${items.filter((x) => x.proposed !== state.sounds.none).length} avec un son)`, {
       label: 'Annuler',
@@ -2485,7 +2777,7 @@ async function suggestSounds() {
 async function onSoundsJob(before, after) {
   if (isRunning(after)) {
     const card = $('#job-card');
-    if (card && ['sounds', 'scene'].includes(after.kind)) card.replaceWith(jobCard(after));
+    if (card && ['sounds', 'scene', 'understand'].includes(after.kind)) card.replaceWith(jobCard(after));
     else renderSounds();
     return;
   }
@@ -2602,6 +2894,10 @@ function renderChecks() {
   const where = { short: 'cut', long: 'cut', missing: 'cast', heard: 'review' };
   const go = (c) => {
     state.focusFrame = c.frame;
+    if (c.kind === 'heard') {
+      state.reviewMode = 'all'; // le texte lu, à corriger (ou « pas du texte ») sur la bulle même
+      state.focusKey = c.key || null;
+    }
     switchScreen(where[c.kind] || 'cast');
   };
   const auto = Object.entries(v.auto || {}).filter(([, n]) => n);
@@ -2691,16 +2987,20 @@ function fixFlag(flag) {
   // va à l'endroit à corriger : la réplique (voix, texte), le son, ou la case dans la découpe
   state.focusFrame = flag.frame;
   const screen = { voice: 'cast', text: 'review', sound: 'sounds', cut: 'cut', other: 'cast' }[flag.reason] || 'cast';
+  if (flag.reason === 'text') state.reviewMode = 'all';
   switchScreen(screen);
 }
 
 function focusFrameRow() {
   // après l'ouverture d'un écran : défile jusqu'à la première ligne de la case visée et la fait clignoter
   const file = state.focusFrame;
+  const key = state.focusKey;
   if (!file) return;
   state.focusFrame = null;
+  state.focusKey = null;
   setTimeout(() => {
-    const row = [...document.querySelectorAll('.line-row[data-key]')].find((r) => r.dataset.key.startsWith(`${file}#`) || r.dataset.key === `frame:${file}`);
+    const rows = [...document.querySelectorAll('.line-row[data-key]')];
+    const row = (key && rows.find((r) => r.dataset.key === key)) || rows.find((r) => r.dataset.key.startsWith(`${file}#`) || r.dataset.key === `frame:${file}`);
     if (row) {
       const folded = row.closest('details');
       if (folded && !folded.open) folded.open = true;
@@ -2793,7 +3093,10 @@ async function poll() {
   try {
     const before = findEpisode(state.current)?.job;
     const progressBefore = JSON.stringify(findEpisode(state.current)?.progress);
+    const jobsBefore = new Map((state.library?.series || []).flatMap((s) => s.chapters.map((c) => [c.id, c.job])));
     state.library = await api('/api/library');
+    for (const s of state.library.series) for (const c of s.chapters) dockFinished(jobsBefore.get(c.id), c.job, c.id);
+    renderDock();
     renderLibrary();
     const after = findEpisode(state.current)?.job;
     if (state.chapter && JSON.stringify(before) === JSON.stringify(after) && progressBefore !== JSON.stringify(findEpisode(state.current)?.progress)) renderHead();

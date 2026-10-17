@@ -312,3 +312,15 @@ def test_json_requests_always_mention_json(monkeypatch):
     assert llm.ping()
     llm.chat([{"role": "user", "content": "Say hi"}])  # le proxy (Azure) exige le mot « json »
     assert all(any("json" in m["content"].lower() for m in body["messages"]) for body in sent)
+
+
+def test_not_text_drops_its_pending_proposals(chapter):
+    ch, hero = chapter
+    data = ch.load()
+    frame = data["frames"][0]
+    frame["review"] = {"IDON'T THINK CAN GO.": {"text": "I DON'T THINK I CAN GO.", "speaker": hero,
+                                                "state": {"text": "pending", "speaker": "pending"}}}
+    review.check_bubble(data, "frame_0001.jpg#0", kind="noise", checked=True)
+    r = frame["review"]["IDON'T THINK CAN GO."]
+    assert r["state"] == {"text": "rejected", "speaker": "rejected", "kind": "accepted"} and r["checked"]
+    assert review.all_bubbles(data)[0]["kind"] == "noise"

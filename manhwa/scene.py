@@ -190,10 +190,12 @@ def run_scene(chapter, cfg, progress=None):
     return len(todo)
 
 
-def recommend(scene, gpt=None, limit=3):
+def recommend(scene, gpt=None, ai=None, limit=3):
     """Les sons à proposer pour une case : [catégorie], et celle à mettre d'office (ou None).
 
-    scene : {"cats", "seen"} de la case ; gpt : la catégorie que GPT a proposée (s'il y en a).
+    scene : {"cats", "seen"} de la case ; gpt : la catégorie que GPT a proposée (s'il y en a) ;
+    ai : le choix de GPT d'après ce qui se passe dans la case (sfx.suggest_sounds) : {"sounds": [a, b]},
+    mis d'office (« a+b »), ou « aucun son » s'il n'en veut pas.
     Le premier son proposé est mis d'office : sur le ch. 1, c'est ton choix 79 fois sur 100
     (contre 34 quand on n'en mettait que là où l'image était « sûre ») ; tu ne choisis
     presque jamais « aucun son ».
@@ -202,4 +204,8 @@ def recommend(scene, gpt=None, limit=3):
     cats.pop("none", None)
     ranked = [c for c, p in sorted(cats.items(), key=lambda kv: -kv[1]) if p >= PROPOSE]
     recs = ([gpt] if gpt else []) + [c for c in ranked if c != gpt]
+    if ai is not None:
+        chosen = [c for c in ai.get("sounds") or [] if c]
+        recs = chosen + [c for c in recs if c not in chosen]
+        return recs[:limit + len(chosen)], ("+".join(chosen) if chosen else "none")
     return recs[:limit], (recs[0] if recs else None)

@@ -43,6 +43,8 @@ music_volume = 0.16       # volume de la musique quand personne ne parle
 music_duck = 0.4          # sous les voix, la musique descend à 40 % de ce volume
 transition = "slide"      # passage d'une frame à l'autre : "slide" (défilement), "fade" ou "none"
 transition_seconds = 0.3
+effects = true            # l'image tremble sur un coup, flash sur un coup violent (d'après les sons)
+depth = true              # relief : pendant le zoom, le premier plan avance un peu plus que le fond
 captions = true           # sous-titres karaoké (le mot dit passe en jaune)
 captions_words = 4        # mots affichés ensemble
 captions_font = ""        # chemin d'une police .ttf ; vide = Impact (ou une autre police grasse de Windows)
@@ -53,6 +55,11 @@ captions_size = 78
 sounds = true             # chaque case prend le son proposé d'après l'image (onglet Sons)
 review = true             # « Tout faire » : les corrections de GPT (texte, type, qui parle) sont acceptées d'office
 speakers = 0.0            # « qui parle » validé d'office à partir de cette confiance (0 = jamais ; 0.2 ≈ 79 % justes)
+
+[sounds]
+# Qui regarde ce qui se passe dans chaque case, pour choisir les bruitages (onglet Sons → Comprendre les cases) :
+# "local" = Qwen3.5-2B sur ta carte graphique (≈ 5 s par case, sans clé) ; "gpt" = GPT regarde l'image.
+vision = "local"
 
 [scraper]
 headless = false           # false : la fenêtre s'affiche (nécessaire pour passer Cloudflare à la main)

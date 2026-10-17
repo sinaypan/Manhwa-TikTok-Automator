@@ -45,11 +45,58 @@ def test_the_video_takes_the_proposal_until_you_choose():
     seen = {"f1.jpg": {"cats": {"fire": 0.6}}, "f2.jpg": {"cats": {"door": 0.8}}}
     assert sfx.frame_sounds(data, seen) == {}  # sans [auto] : seulement tes choix
     auto = sfx.frame_sounds(data, seen, auto=True)
-    assert list(auto) == ["f1.jpg"] and "fire" in auto["f1.jpg"][0].replace("\\", "/")  # « aucun son » choisi : respecté
+    assert list(auto) == ["f1.jpg"] and "fire" in auto["f1.jpg"][0][0].replace("\\", "/")  # « aucun son » choisi : respecté
 
 
 def test_drawn_english_sound_effects_are_recognised():
     assert [sfx.onomatopoeia(t) for t in ("BAM!", "WHOOOOSH", "CLANG CLANG", "THUD...", "LA", "9F", "")] == \
         ["punch", "whoosh", "metal", "impact", None, None, None]
     data = {"frames": [{"file": "f1.jpg", "crop": [0, 0, 10, 10], "bubbles": [{"text": "SHIIING", "kind": "sfx", "box": [0, 0, 5, 5]}]}]}
-    assert sfx.spots(data, {"f1.jpg": {"cats": {"punch": 0.7}}})[0]["recs"][:2] == ["slash", "punch"]
+    assert sfx.spots(data, {"f1.jpg": {"cats": {"punch": 0.7}}})[0]["recs"][:2] == ["blade_draw", "punch"]
+    assert [sfx.onomatopoeia(t) for t in ("SPLAT", "쾅!!", "덜컹")] == ["blood", "slam", "wood"]
+
+
+def test_gpt_choice_from_what_happens_comes_first_and_can_be_two_sounds():
+    fire = {"cats": {"fire": 0.6, "wood": 0.2}}
+    assert scene.recommend(fire, ai={"sounds": ["slam", "blood"]}) == (["slam", "blood", "fire", "wood"], "slam+blood")
+    assert scene.recommend(fire, ai={"sounds": []}) == (["fire", "wood"], "none")
+    data = {"frames": [{"file": "f1.jpg", "crop": [0, 0, 10, 10], "bubbles": []}]}
+    seen = {"f1.jpg": {"cats": {}, "ai": {"frame:f1.jpg": {"what": "Il est projeté contre un mur", "sounds": ["slam", "blood"], "why": "choc et sang"}}}}
+    item = sfx.silent_frames(data, seen)[0]
+    assert (item["proposed"], item["what"], item["why"]) == ("slam+blood", "Il est projeté contre un mur", "choc et sang")
+    sfx.set_sounds(data, [{"key": "frame:f1.jpg", "sound": ["punch", "blood"]}])
+    assert sfx.silent_frames(data, seen)[0]["sound"] == "punch+blood"
+    assert sfx.layers("punch+blood") == ["punch", "blood"] and sfx.layers("none") == []
+    import pytest
+    with pytest.raises(ValueError):
+        sfx.set_sounds(data, [{"key": "frame:f1.jpg", "sound": "punch+laser"}])
+
+
+def test_the_image_shakes_and_flashes_with_the_hits():
+    from manhwa import motion
+
+    assert motion.effects([]) == {}
+    assert motion.effects([(["footsteps"], 2)]) == {}  # des pas : rien ne bouge
+    soft = motion.effects([(["punch"], 1)])
+    hard = motion.effects([(["slam", "blood"], 3)])
+    assert hard["shake"] > motion.effects([(["punch"], 2)])["shake"] and "flash" in hard and "flash" not in soft
+    assert motion.offset(0.0, 10) == (0.0, 0.0) and motion.offset(2.0, 10) == (0.0, 0.0)
+    assert abs(motion.offset(0.07, 10)[0]) > 0 and motion.flash_at(0.06, 0.5) > 0.4
+    data = {"frames": [{"file": "f1.jpg", "crop": [0, 0, 10, 10], "bubbles": [], "action_sound": {"chosen": "slam+blood"}}]}
+    seen = {"f1.jpg": {"ai": {"frame:f1.jpg": {"sounds": ["slam"], "strength": 3}}}}
+    assert sfx.frame_hits(data, seen) == {"f1.jpg": [(["slam", "blood"], 3)]}
+
+
+def test_takes_are_cut_on_silences_and_levelled():
+    import numpy as np
+
+    from manhwa import soundbank
+
+    rate = soundbank.RATE
+    hit = np.sin(np.linspace(0, 400, int(0.3 * rate))) * 0.5
+    y = np.concatenate([hit, np.zeros(int(0.5 * rate)), hit * 0.1, np.zeros(int(0.5 * rate))]).astype(np.float32)
+    parts = soundbank.takes(y)
+    assert len(parts) == 2 and all(0.25 < len(p) / rate < 0.5 for p in parts)
+    a, b = soundbank._level(parts[0].copy()), soundbank._level(parts[1].copy())
+    assert abs(np.sqrt(np.mean(a[: len(a) // 2] ** 2)) - np.sqrt(np.mean(b[: len(b) // 2] ** 2))) < 0.02  # même volume
+    assert sfx.gains("punch+blood", 3)[0] > sfx.gains("punch", 1)[0] and sfx.gains("footsteps", 2)[0] < 1
