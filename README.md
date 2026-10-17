@@ -37,6 +37,7 @@ tout la prend seul quand elle est là.
 |---|---|---|
 | Voix qui jouent l'émotion (Chatterbox), ce qui se passe dans les cases (Qwen3.5-2B), l'écoute des sons (CLAP) | `.venv-tts` | voir `manhwa/chatterbox_tts.py` et `manhwa/vision.py` |
 | Voix décrites et jouées par Qwen3-TTS | `.venv-qwen` | voir `manhwa/qwen_voice.py` |
+| Visages qui parlent : bouches et yeux redessinés (FLUX.2 [klein] 4B) | `.venv-edit` | voir `manhwa/edit_worker.py` |
 
 **Bruitages et ambiances pro** (Sonniss, gratuits et utilisables sur une chaîne monétisée,
 ≈ 2 Go dans `.cache/`, jamais commités) :
@@ -276,6 +277,12 @@ rangent dans `sfx/<catégorie>/`.
 choisi un son, dans tous tes épisodes. Avant chaque proposition, cette mémoire se teste sur tes
 choix (chaque case devinée par les autres) : elle ne sert que si elle fait mieux que la
 proposition habituelle. Avec un seul épisode, elle attend (46 % contre 83 % sur l'épisode 1).
+
+**Visages qui parlent** (onglet Personnages) : pour chaque personnage qui parle, l'IA
+(FLUX.2 [klein] 4B, Apache 2.0, ≈ 20 s par dessin sur une carte de 6 Go) redessine dans le style
+de la case trois bouches et les yeux fermés ; dans la vidéo, la bouche bat à chaque syllabe et
+les yeux clignent. Un aperçu animé par visage : **C'est bon**, **Pas animé**, ou **Redessiner**
+(l'IA le refait autrement). Réglé par `[render] talk`.
 
 **Les lieux** : GPT coupe l'épisode en lieux (prison, marché, forêt…) ; chacun a une ambiance
 de fond, très basse, et les voix y résonnent comme dans le lieu. **L'image réagit** aux

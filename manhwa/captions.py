@@ -131,7 +131,13 @@ def burn(clip, evts, cfg, y):
         if i not in cache:
             cache.clear()
             img = draw(evts[i][2], evts[i][3], width, font_file, size)
-            cache[i] = (img[:, :, :3].astype(np.float32), img[:, :, 3:4].astype(np.float32) / 255.0)
+            ys, xs = np.nonzero(img[:, :, 3])  # seulement le rectangle du texte : le reste de la bande est vide
+            if not len(xs):
+                cache[i] = None
+            else:
+                y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+                cut = img[y0:y1, x0:x1]
+                cache[i] = (y0, x0, cut[:, :, :3].astype(np.float32), cut[:, :, 3:4].astype(np.float32) / 255.0)
         return cache[i]
 
     def frame(get_frame, t):
@@ -139,11 +145,15 @@ def burn(clip, evts, cfg, y):
         cap = caption(t)
         if cap is None:
             return out
-        rgb, alpha = cap
-        h = min(rgb.shape[0], out.shape[0] - y)
-        out = out.copy()
-        band = out[y:y + h].astype(np.float32)
-        out[y:y + h] = (band * (1 - alpha[:h]) + rgb[:h] * alpha[:h]).astype(np.uint8)
+        dy, x0, rgb, alpha = cap
+        top = y + dy
+        h = min(rgb.shape[0], out.shape[0] - top)
+        if h <= 0:
+            return out
+        out = out.copy()  # l'image peut être gardée ailleurs (visages qui parlent) : on n'écrit pas dedans
+        w = rgb.shape[1]
+        band = out[top:top + h, x0:x0 + w].astype(np.float32)
+        out[top:top + h, x0:x0 + w] = (band * (1 - alpha[:h]) + rgb[:h] * alpha[:h]).astype(np.uint8)
         return out
 
     return clip.transform(frame)

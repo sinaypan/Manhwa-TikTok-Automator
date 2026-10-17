@@ -353,6 +353,48 @@ def create_app(cfg):
             raise HTTPException(404, "Visage introuvable")
         return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "max-age=600"})
 
+    @app.get("/api/talk")
+    def talk_detail(id: str = Query(...)):
+        """Les visages qui parlent (bouches et yeux redessinés), pour l'onglet Personnages."""
+        from manhwa import talk
+
+        return talk.detail(chapter_of(id))
+
+    @app.get("/api/talk/image")
+    def talk_image(id: str = Query(...), face: str = Query(..., pattern=r"^f\d{4}$"), state: str = Query(...)):
+        """Le visage avec une bouche (ou les yeux fermés), tel qu'il sera dans la vidéo."""
+        from manhwa import talk
+
+        img = talk.preview(chapter_of(id), face, state)
+        if img is None:
+            raise HTTPException(404, "Dessin introuvable")
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        return Response(buf.tobytes(), media_type="image/jpeg", headers={"Cache-Control": "max-age=600"})
+
+    @app.put("/api/talk")
+    def talk_set(id: str = Query(...), payload: dict = Body(...)):
+        """Un visage validé (ok : true), pas animé (false) ou de nouveau à regarder (null)."""
+        from manhwa import talk
+
+        chapter = chapter_of(id)
+        with lock_for(id):
+            try:
+                talk.set_ok(chapter, str(payload.get("face") or ""), payload.get("ok"))
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+        return talk.detail(chapter)
+
+    @app.post("/api/talk/run")
+    def talk_run(id: str = Query(...), face: str = Query("")):
+        """Dessine les visages qui parlent (≈ 1 min par visage) ; avec face, redessine celui-là autrement."""
+        from manhwa import talk
+
+        if talk.edit_python() is None:
+            raise HTTPException(422, "FLUX.2 [klein] n'est pas installé (.venv-edit, voir manhwa/edit_worker.py)")
+        if face:
+            return jobs.submit(id, chapter_of(id), kind="talk_redo", params={"face": face})
+        return jobs.submit(id, chapter_of(id), kind="talk")
+
     @app.get("/api/crop")
     def frame_region(id: str = Query(...), frame: str = Query(...), y: int = Query(0, ge=0), h: int = Query(..., gt=0),
                      w: int = Query(360, ge=120, le=720)):

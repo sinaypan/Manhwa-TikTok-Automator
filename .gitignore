@@ -26,6 +26,7 @@ __pycache__/
 .venv/
 .venv-tts/
 .venv-qwen/
+.venv-edit/
 venv/
 env/
 

@@ -2635,3 +2635,46 @@ details.silent-block > summary .muted {
   width: 12px;
   height: 12px;
 }
+
+/* Personnages : les visages qui parlent */
+.talk-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.talk-anim {
+  border-radius: 10px;
+  background: var(--sep);
+  object-fit: cover;
+}
+
+.talk-anim.big {
+  width: 200px;
+  height: 200px;
+}
+
+.talk-anim.small {
+  width: 64px;
+  height: 64px;
+}
+
+.talk-info {
+  min-width: 160px;
+}
+
+.talk-info .tag {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--sep);
+}
+
+.talk-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

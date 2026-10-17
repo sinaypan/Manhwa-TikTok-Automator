@@ -16,13 +16,13 @@ STEP_LABELS = {"frames": "Frames", "ocr": "Lecture du texte", "tts": "Voix", "re
                "faces": "Recherche des visages", "wiki": "Lecture du wiki", "wiki_images": "Images du wiki",
                "wiki_faces": "Visages du wiki", "review": "Relecture GPT", "voices": "Choix des voix",
                "sounds": "Choix des sons (GPT)", "scene": "Ce que montrent les cases",
-               "describe": "Ce qui se passe dans les cases", "places": "Lieux et ambiances", "memory": "Sons appris de tes choix",
+               "describe": "Ce qui se passe dans les cases", "places": "Lieux et ambiances", "memory": "Sons appris de tes choix", "talk": "Visages qui parlent", "talk_redo": "Visage redessiné",
                "textfix": "Correction du texte", "listen": "Réécoute de la voix", "pilot": "Pilote automatique", "parts": "Découpe en parties",
                "download": "Téléchargement"}
 # ce que l'on compte à chaque étape (« 6 210 / 12 960 images »)
 STEP_UNITS = {"frames": "frames", "ocr": "frames lues", "tts": "voix", "render": "images", "faces": "frames", "wiki": "",
               "wiki_images": "images", "wiki_faces": "images", "review": "lots", "voices": "", "sounds": "",
-              "scene": "cases", "describe": "cases", "places": "", "memory": "cases", "textfix": "", "listen": "répliques", "pilot": "", "parts": "parties", "download": ""}
+              "scene": "cases", "describe": "cases", "places": "", "memory": "cases", "talk": "dessins", "talk_redo": "dessins", "textfix": "", "listen": "répliques", "pilot": "", "parts": "parties", "download": ""}
 IMPORT_ID = "import"  # l'import n'a pas encore de chapitre : il a sa propre ligne
 
 
@@ -76,6 +76,7 @@ class Jobs:
         from manhwa.sfx import suggest_sounds
         from manhwa.places import run_places
         from manhwa.sound_memory import run_memory
+        from manhwa.talk import run_talk
         from manhwa.vision import run_describe
         from manhwa.tts import run_tts
         from manhwa.voices import propose as propose_voices
@@ -92,6 +93,8 @@ class Jobs:
             "describe": lambda c, p: run_describe(c, cfg, progress=p),
             "places": lambda c, p: run_places(c, cfg, progress=p),
             "memory": lambda c, p: run_memory(c, cfg, progress=p),
+            "talk": lambda c, p: run_talk(c, cfg, progress=p),
+            "talk_redo": lambda c, p: run_talk(c, cfg, progress=p, only=params.get("face")),
             "scene": lambda c, p: run_scene(c, cfg, progress=p),
             "textfix": lambda c, p: run_textfix(c, cfg, progress=p),
             "listen": lambda c, p: run_listen(c, cfg, progress=p),
@@ -105,7 +108,7 @@ class Jobs:
         plans = {
             "make": ["frames", "ocr", "textfix", "tts", "render", "listen?"],
             "auto": ["frames", "ocr", "textfix", "faces", "scene?", "describe?", "wiki?", "review?", "voices?", "sounds?",
-                     "memory?", "places?", "pilot?", "tts", "render", "listen?", "parts?"],
+                     "memory?", "places?", "talk?", "pilot?", "tts", "render", "listen?", "parts?"],
             "understand": ["scene", "describe", "sounds", "memory?", "places?"],
             "wiki_images": ["wiki_images", "wiki_faces"],
         }
@@ -139,9 +142,14 @@ class Jobs:
                 for step, run, optional in self._steps(kind, params):
                     self._set(chapter_id, step=step, label=STEP_LABELS[step], status="running", progress=None,
                               done=None, total=None, unit=STEP_UNITS[step], step_started=time.time())
+                    started = time.time()
                     try:
                         run(chapter, lambda done, total, cid=chapter_id: self._set(
                             cid, progress=round(done / total, 4) if total else None, done=done, total=total))
+                        spent = round(time.time() - started)
+                        print(f"  {STEP_LABELS[step]} : {spent // 60} min {spent % 60:02d} s")  # où part le temps
+                        with self.lock:
+                            self.state[chapter_id].setdefault("timings", {})[step] = spent
                     except Exception as e:
                         if not optional:
                             raise

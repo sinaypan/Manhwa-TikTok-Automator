@@ -19,6 +19,7 @@ import math
 import os
 
 from manhwa.config import ROOT
+from manhwa.panels import STUDIO_DIR
 from manhwa.project import fingerprint
 
 GAP_SECONDS = 0.15     # blanc entre deux répliques d'une même frame
@@ -67,7 +68,12 @@ def render_key(chapter, data, cfg):
         scene = load_scene(chapter)
         mood = ([moods.frame_mood(f, scene) for f in data["frames"]],
                 {m: os.path.getsize(p) for m, p in moods.tracks().items()})
-    return fingerprint(parts, cfg["render"], cfg["output"], music and os.path.getsize(music), mood)
+    talking = None
+    if cfg["render"].get("talk"):
+        from manhwa.talk import load_parts
+
+        talking = load_parts(chapter)
+    return fingerprint(parts, cfg["render"], cfg["output"], music and os.path.getsize(music), mood, talking)
 
 
 def _loudness(video, target):
@@ -135,8 +141,8 @@ def _ease(x):
     return x * x * (3 - 2 * x)
 
 
-def zoom_clip(image, duration, amount, zoom_in=True):
-    """La frame qui grossit (ou rapetisse) de `amount` (0.04 = 4 %) sur sa durée."""
+def zoom_clip(image, duration, amount, zoom_in=True, anim=None):
+    """La frame qui grossit (ou rapetisse) de `amount` (0.04 = 4 %) sur sa durée (anim(t) : l'image qui bouge)."""
     import cv2
     from moviepy import VideoClip
 
@@ -147,12 +153,13 @@ def zoom_clip(image, duration, amount, zoom_in=True):
         s = 1 + amount * (p if zoom_in else 1 - p)
         ch, cw = round(h / s), round(w / s)
         y0, x0 = (h - ch) // 2, (w - cw) // 2
-        return cv2.resize(image[y0:y0 + ch, x0:x0 + cw], (w, h), interpolation=cv2.INTER_LINEAR)
+        src = anim(t) if anim else image
+        return cv2.resize(src[y0:y0 + ch, x0:x0 + cw], (w, h), interpolation=cv2.INTER_LINEAR)
 
     return VideoClip(frame, duration=duration)
 
 
-def pan_clip(tall, out_h, duration):
+def pan_clip(tall, out_h, duration, anim=None):
     """Une case haute, en pleine largeur, qui défile du haut vers le bas (pause au début et à la fin)."""
     from moviepy import VideoClip
 
@@ -161,7 +168,7 @@ def pan_clip(tall, out_h, duration):
     def frame(t):
         p = _ease((t / duration - 0.12) / 0.76) if duration else 0
         y = round(travel * p)
-        return tall[y:y + out_h]
+        return (anim(t) if anim else tall)[y:y + out_h]
 
     return VideoClip(frame, duration=duration)
 
@@ -278,6 +285,15 @@ def run_render(chapter, cfg, force=False, progress=None):
         return False
 
     key = render_key(chapter, data, cfg)
+    talking = None
+    if cfg["render"].get("talk"):
+        from manhwa import talk as talking
+
+        face_parts = talking.load_parts(chapter)
+        faces_of = {}
+        for f in (data.get("faces") or {}).get("list") or []:
+            if f["id"] in face_parts and not f.get("not_face"):
+                faces_of.setdefault(f["frame"], []).append(f)
     if not force and chapter.video_path.is_file() and data["steps"].get("render", {}).get("key") == key:
         print(f"  Vidéo déjà à jour : {chapter.video_path.name}")
         return False
@@ -365,6 +381,18 @@ def run_render(chapter, cfg, force=False, progress=None):
         audio = CompositeAudioClip(layers).with_duration(duration) if layers else None
 
         tall = _tall_image(strip, frame["crop"], out_w) if pan else None
+        lines = []
+        if talking and frame["file"] in faces_of:  # la bouche de celui qui parle suit sa voix (talk.py)
+            lines = [(seg.get("speaker"), t, talking.envelope(a, a.duration)) for (seg, a), t in zip(loaded, starts_in)]
+
+        def talker(img, scale, offset):
+            if not lines:
+                return None
+            try:
+                return talking.animator(chapter, img, scale, offset, faces_of[frame["file"]], face_parts, lines, seed=i)
+            except Exception as e:  # un dessin abîmé : la case reste immobile, la vidéo se fait quand même
+                print(f"  [!] Visage qui parle ignoré ({frame['file']} : {e})")
+                return None
         def bubble_times():
             from manhwa.review import effective
 
@@ -376,16 +404,17 @@ def run_render(chapter, cfg, force=False, progress=None):
             times = bubble_times() if guided else []
             if len(times) >= 2:  # case haute et longue : elle défile jusqu'à la bulle de chaque réplique
                 f = tall.shape[1] / frame["crop"][2]
-                clip = motion.guided_pan_clip(tall, out_h, duration, [(max(0.0, s - 0.3), (b[1] + b[3] / 2) * f) for s, b in times])
+                clip = motion.guided_pan_clip(tall, out_h, duration, [(max(0.0, s - 0.3), (b[1] + b[3] / 2) * f) for s, b in times],
+                                              anim=talker(tall, f, (0, 0)))
             else:
-                clip = pan_clip(tall, out_h, duration)
+                clip = pan_clip(tall, out_h, duration, anim=talker(tall, tall.shape[1] / frame["crop"][2], (0, 0)))
         else:
             rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             depth = None
             if zoom > 0 and r.get("depth", True):
                 try:
                     boxes = [b["box"] for b in frame.get("bubbles") or []]  # les bulles bougent d'un bloc
-                    depth = motion.depth_map(rgb, motion.panel_rect(rgb, frame["crop"][2:4]), boxes, frame["crop"][2])
+                    depth = motion.cached_depth(chapter.root / STUDIO_DIR / "depth", rgb, frame["crop"], boxes)
                 except Exception as e:  # sans le modèle : le zoom simple
                     print(f"  [!] Relief indisponible ({e})")
                     r = {**r, "depth": False}
@@ -394,12 +423,14 @@ def run_render(chapter, cfg, force=False, progress=None):
                 times = bubble_times()
                 if len(times) >= 2:
                     guide = motion.guide_keys(motion.panel_rect(rgb, frame["crop"][2:4]), frame["crop"][2], times, duration)
+            rect = motion.panel_rect(rgb, frame["crop"][2:4])
+            anim = talker(rgb, rect[2] / frame["crop"][2], rect[:2])
             if guide:
-                clip = motion.guided_clip(rgb, duration, guide)
+                clip = motion.guided_clip(rgb, duration, guide, anim=anim)
             elif depth is not None:
-                clip = motion.depth_zoom_clip(rgb, depth, duration, zoom, zoom_in=i % 2 == 0)
+                clip = motion.depth_zoom_clip(rgb, depth, duration, zoom, zoom_in=i % 2 == 0, anim=anim)
             else:
-                clip = zoom_clip(rgb, duration, zoom, zoom_in=i % 2 == 0) if zoom > 0 else zoom_clip(rgb, duration, 0)
+                clip = zoom_clip(rgb, duration, max(zoom, 0), zoom_in=i % 2 == 0, anim=anim)
         clip = motion.apply(clip, motion.effects(reacts.get(frame["file"], [])))  # tremblement, flash sur les coups
         clips.append(clip)
         audios.append(audio)

@@ -32,6 +32,8 @@ KIND_STEPS.understand = [
   ['places', 'Lieux et ambiances'],
 ];
 KIND_STEPS.scene = [['scene', 'Ce que montrent les cases']];
+KIND_STEPS.talk = [['talk', 'Visages qui parlent']];
+KIND_STEPS.talk_redo = [['talk_redo', 'Visage redessiné']];
 const AUTO_STEPS = [
   ['frames', 'Frames 9:16'],
   ['ocr', 'Lecture du texte'],
@@ -45,6 +47,7 @@ const AUTO_STEPS = [
   ['sounds', 'Sons'],
   ['memory', 'Sons appris de tes choix'],
   ['places', 'Lieux et ambiances'],
+  ['talk', 'Visages qui parlent'],
   ['pilot', 'Pilote automatique'],
   ['tts', 'Voix'],
   ['render', 'Rendu vidéo'],
@@ -53,7 +56,7 @@ const AUTO_STEPS = [
 ];
 KIND_STEPS.listen = [['listen', 'Réécoute de la voix']];
 KIND_STEPS.parts = [['parts', 'Découpe en parties']];
-const KIND_TITLES = { auto: 'Tout faire', faces: 'Recherche des personnages', wiki: 'Lecture du wiki', wiki_images: 'Images du wiki', review: 'Relecture par GPT', voices: 'Choix des voix par GPT', sounds: 'Sons proposés par GPT', scene: 'Ce que montrent les cases', understand: 'Comprendre les cases' };
+const KIND_TITLES = { auto: 'Tout faire', faces: 'Recherche des personnages', wiki: 'Lecture du wiki', wiki_images: 'Images du wiki', review: 'Relecture par GPT', voices: 'Choix des voix par GPT', sounds: 'Sons proposés par GPT', scene: 'Ce que montrent les cases', understand: 'Comprendre les cases', talk: 'Visages qui parlent', talk_redo: 'Visage redessiné' };
 const SCREENS = [
   ['cut', 'Découpe'],
   ['cast', 'Personnages'],
@@ -274,6 +277,8 @@ const state = {
   bubbles: null, // toutes les bulles du chapitre (mode 'all')
   bubbleKeys: new Set(), // bulles encore à vérifier
   autoAnalyzed: new Set(), // chapitres dont on a déjà lancé la recherche de visages tout seul
+  talk: null, // visages qui parlent (bouches et yeux redessinés), renvoyés par /api/talk
+  talkKeys: new Set(), // visages encore à regarder
 };
 
 const isRunning = (job) => job && (job.status === 'queued' || job.status === 'running');
@@ -1130,8 +1135,9 @@ async function openCast() {
   $('#view').replaceChildren(el('div', { class: 'head', id: 'head' }), el('div', { id: 'cast' }, el('div', { class: 'skeleton short' })), el('div', { id: 'tray', class: 'tray', hidden: true }));
   renderHead();
   try {
-    const c = await api(`/api/cast?id=${enc(id)}`);
+    const [c, t] = await Promise.all([api(`/api/cast?id=${enc(id)}`), api(`/api/talk?id=${enc(id)}`).catch(() => null)]);
     if (state.chapter?.id !== id || state.screen !== 'cast') return;
+    setTalk(t, true);
     setCast(c, true);
     focusFrameRow();
   } catch (e) {
@@ -1183,7 +1189,7 @@ function renderCast() {
   } else if (c.status === 'stale' && !isRunning(job)) {
     parts.push(el('div', { class: 'notice' }, icon('alert'), el('p', {}, 'La découpe a changé depuis. ', el('button', { type: 'button', class: 'link', onclick: () => analyzeFaces() }, 'Chercher les visages à nouveau'), ' (ce que tu as rangé est gardé).')));
   }
-  if (c.status !== 'missing') parts.push(charsSection(), linesSection());
+  if (c.status !== 'missing') parts.push(charsSection(), linesSection(), talkSection());
   box.replaceChildren(...parts);
   renderTray();
 }
@@ -1775,6 +1781,11 @@ async function acceptProposals() {
 
 async function onCastJob(before, after) {
   // la recherche des visages avance, ou vient de finir
+  if (isRunning(before) && !isRunning(after) && ['talk', 'talk_redo', 'auto'].includes(before.kind)) {
+    try {
+      setTalk(await api(`/api/talk?id=${enc(state.chapter.id)}`), before.kind !== 'talk_redo');
+    } catch {}
+  }
   if (isRunning(after)) {
     const card = $('#job-card');
     if (card && KIND_STEPS[after.kind]) card.replaceWith(jobCard(after));
@@ -1786,6 +1797,109 @@ async function onCastJob(before, after) {
       const c = await api(`/api/cast?id=${enc(state.chapter.id)}`);
       if (state.screen === 'cast') setCast(c, true);
     } catch {}
+  }
+}
+
+/* ---------- Visages qui parlent : bouches et yeux redessinés par l'IA ---------- */
+
+// l'aperçu parle comme dans la vidéo : la bouche bat (12 poses/s au plus), un clignement de temps en temps
+const TALK_LOOP = ['mouth_closed', 'mouth_half', 'mouth_open', 'mouth_half', 'mouth_closed', 'mouth_open', 'mouth_open', 'mouth_half',
+  'mouth_closed', 'mouth_closed', 'mouth_half', 'mouth_open', 'mouth_closed', 'eyes_closed', 'eyes_closed', 'mouth_closed'];
+let talkTick = 0;
+setInterval(() => {
+  const imgs = document.querySelectorAll('img.talk-anim');
+  if (!imgs.length) return;
+  talkTick = (talkTick + 1) % TALK_LOOP.length;
+  for (const img of imgs) {
+    const src = img.dataset[TALK_LOOP[talkTick].replace('_c', 'C').replace('_h', 'H').replace('_o', 'O')];
+    if (src) img.src = src;
+  }
+}, 120);
+
+function setTalk(t, fresh = false) {
+  state.talk = t;
+  if (t && fresh) state.talkKeys = new Set(t.faces.filter((f) => f.ok == null).map((f) => f.id));
+}
+
+function talkImg(f, size = 'big') {
+  const src = (s) => `/api/talk/image?id=${enc(state.chapter.id)}&face=${enc(f.id)}&state=${s}&v=${f.v}`;
+  const states = f.mouth ? ['mouth_closed', 'mouth_half', 'mouth_open'] : [];
+  if (f.eyes) states.push('eyes_closed');
+  for (const s of states) new Image().src = src(s); // préchargées : l'aperçu ne clignote pas
+  const data = {};
+  for (const s of states) data[`data-${s.replace('_', '-')}`] = src(s);
+  return el('img', { class: `talk-anim ${size}`, src: src('mouth_closed'), alt: '', ...data });
+}
+
+function talkSection() {
+  const t = state.talk;
+  if (!t || (!t.faces.length && !t.available)) return null;
+  const job = castJob();
+  const busy = isRunning(job) && ['talk', 'talk_redo'].includes(job.kind);
+  const todo = t.faces.filter((f) => state.talkKeys.has(f.id));
+  const done = t.faces.filter((f) => !state.talkKeys.has(f.id));
+  const head = el('div', { class: 'block-head row' },
+    el('div', { class: 'grow' }, el('h3', { text: 'Visages qui parlent' }),
+      el('p', { class: 'muted', text: 'Quand un personnage parle, sa bouche bat au rythme de sa voix et ses yeux clignent : l’IA redessine la bouche (fermée, entrouverte, ouverte) et les yeux fermés, dans le style de la case.' })),
+    !t.faces.length && t.available && !busy
+      ? el('button', { type: 'button', class: 'pill accent', onclick: () => runTalk() }, icon('sparkles'), `Dessiner les ${t.talkers} visages (≈ ${Math.max(1, Math.round(t.talkers * 1.2))} min)`)
+      : null);
+  if (!t.faces.length) return el('section', { class: 'cast-block', id: 'talk-block' }, head);
+  return el('section', { class: 'cast-block', id: 'talk-block' }, head,
+    todo.length
+      ? el('div', { class: 'queue talk-queue' }, todo.map(talkRow))
+      : el('p', { class: 'muted queue-empty', text: 'Tous les visages sont regardés.' }),
+    doneList('talk-done', `${plural(done.length, 'visage regardé', 'visages regardés')}`, done.map(talkRow)));
+}
+
+function talkRow(f) {
+  const pending = state.talkKeys.has(f.id);
+  const job = castJob();
+  const redrawing = isRunning(job) && job.kind === 'talk_redo' && job.params?.face === f.id;
+  return el('div', { class: 'talk-row line', 'data-key': f.id },
+    talkImg(f, pending ? 'big' : 'small'),
+    el('div', { class: 'grow talk-info' },
+      el('b', { text: charLabel(f.char) }),
+      el('span', { class: 'muted', text: ` · case ${f.case}${!f.mouth ? ' · bouche non trouvée' : ''}${!f.eyes ? ' · yeux non trouvés' : ''}` }),
+      !pending ? el('span', { class: f.ok === false ? 'tag warn' : 'tag ok', text: f.ok === false ? 'Pas animé' : 'Animé' }) : null),
+    el('div', { class: 'talk-actions' },
+      redrawing
+        ? el('span', { class: 'muted' }, el('span', { class: 'spinner' }), ' Redessin…')
+        : [
+            el('button', { type: 'button', class: 'pill accent', onclick: () => decideTalk(f, true) }, icon('check'), 'C’est bon'),
+            el('button', { type: 'button', class: 'pill', onclick: () => decideTalk(f, false) }, 'Pas animé'),
+            el('button', { type: 'button', class: 'link quiet', title: 'L’IA redessine ce visage autrement (≈ 1 min)', onclick: () => runTalk(f.id) }, 'Redessiner'),
+          ]));
+}
+
+async function decideTalk(f, ok) {
+  const pending = state.talkKeys.has(f.id);
+  try {
+    const t = await api(`/api/talk?id=${enc(state.chapter.id)}`, { method: 'PUT', body: JSON.stringify({ face: f.id, ok }) });
+    state.talk = t;
+    if (!pending) return renderCast();
+    settle(f.id, SETTLE, () => {
+      state.talkKeys.delete(f.id);
+      const fresh = talkSection();
+      if (fresh) afterSettle(f.id, fresh);
+    });
+  } catch (e) {
+    toast(`Non enregistré : ${e.message}`);
+  }
+}
+
+async function runTalk(face = '') {
+  try {
+    const job = await api(`/api/talk/run?id=${enc(state.chapter.id)}${face ? `&face=${enc(face)}` : ''}`, { method: 'POST' });
+    const ep = findEpisode(state.chapter.id);
+    if (ep) ep.job = job;
+    if (state.cast) state.cast.job = job;
+    if (face) state.talkKeys.add(face);
+    renderCast();
+    schedulePoll(500);
+    toast(face ? 'Je redessine ce visage (≈ 1 min)' : 'Les visages se dessinent : tu peux continuer pendant ce temps');
+  } catch (e) {
+    toast(`Impossible : ${e.message}`);
   }
 }
 
