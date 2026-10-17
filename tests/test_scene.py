@@ -100,3 +100,21 @@ def test_takes_are_cut_on_silences_and_levelled():
     a, b = soundbank._level(parts[0].copy()), soundbank._level(parts[1].copy())
     assert abs(np.sqrt(np.mean(a[: len(a) // 2] ** 2)) - np.sqrt(np.mean(b[: len(b) // 2] ** 2))) < 0.02  # même volume
     assert sfx.gains("punch+blood", 3)[0] > sfx.gains("punch", 1)[0] and sfx.gains("footsteps", 2)[0] < 1
+
+
+def test_sonniss_picks_useful_sounds_and_ambiences_by_name():
+    from manhwa import sonniss
+
+    z = "https://mirror/x.zip"
+    files = [(z, "SoundBits -  Just Gore | Add On/Splat_01.wav", 300_000),
+             (z, "Pack/Punch_Heavy_03.wav", 200_000), (z, "Pack/Punch_Heavy_03.wav", 200_000),  # en double
+             (z, "Pack/Car Engine Idle.wav", 100_000),  # rien d'utile
+             (z, "Pack/Wind, Ext, Gust, Grasslands.wav", 40_000_000),  # long, mais utile (son début)
+             (z, "Amb/Forest quiet birds morning.wav", 20_000_000), (z, "Amb/City traffic forest.wav", 20_000_000),
+             (z, "Amb/Cave drips loop.wav", 1_000_000)]  # trop court pour une ambiance
+    p = sonniss.choose(files)
+    names = [n.rsplit("/", 1)[-1] for _, n, _ in p["sfx"]]
+    assert names == ["Splat_01.wav", "Punch_Heavy_03.wav", "Wind, Ext, Gust, Grasslands.wav"]
+    # une longue prise de vent sert aussi d'ambiance ; la ville et la prise trop courte, non
+    assert [n.rsplit("/", 1)[-1] for _, n, _ in p["ambience"]] == ["Forest quiet birds morning.wav",
+                                                                  "Wind, Ext, Gust, Grasslands.wav"]

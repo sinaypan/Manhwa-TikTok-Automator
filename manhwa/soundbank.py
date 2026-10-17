@@ -7,6 +7,7 @@ les écouter avec CLAP, sans rien entraîner).
 
     python -m manhwa.soundbank              prépare la bibliothèque et les ambiances (une fois, ≈ 5 min)
     python -m manhwa.soundbank --ambience   seulement les ambiances (places.py)
+    python -m manhwa.soundbank --download   télécharge d'abord les sons Sonniss utiles (sonniss.py, ≈ 2 Go)
 
 1. Chaque fichier de .cache/sonniss/raw/ (et de sfx/<catégorie>/) est coupé en prises : un fichier
    pro contient souvent plusieurs coups séparés par des silences. Chaque prise (0,1 à 4 s) est mise
@@ -493,6 +494,10 @@ if __name__ == "__main__":
     import sys
 
     show = lambda d, t: print(f"{d}/{t}", end="\r", flush=True)  # noqa: E731
+    if "--download" in sys.argv:  # les sons Sonniss utiles (sonniss.py), puis tout est préparé
+        from manhwa import sonniss
+
+        print("  {} bruitages, {} ambiances".format(*sonniss.download(show)))
     if "--ambience" not in sys.argv:
         print(f"\n{prepare(show)} prises rangées dans {bank_dir()}")
     print(f"\n{prepare_ambience(show)} ambiances prêtes")

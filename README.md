@@ -31,6 +31,20 @@ rapide (0,07 s par case au lieu de 1,7 s sur une RTX 3050), et Whisper, Kokoro e
 détecteurs aussi. Voir [requirements-gpu.txt](requirements-gpu.txt) ;
 tout la prend seul quand elle est là.
 
+**Modèles locaux** (facultatifs, chacun dans son environnement pour ne rien casser) :
+
+| Pour | Environnement | Installation |
+|---|---|---|
+| Voix qui jouent l'émotion (Chatterbox), ce qui se passe dans les cases (Qwen3.5-2B), l'écoute des sons (CLAP) | `.venv-tts` | voir `manhwa/chatterbox_tts.py` et `manhwa/vision.py` |
+| Voix décrites et jouées par Qwen3-TTS | `.venv-qwen` | voir `manhwa/qwen_voice.py` |
+
+**Bruitages et ambiances pro** (Sonniss, gratuits et utilisables sur une chaîne monétisée,
+≈ 2 Go dans `.cache/`, jamais commités) :
+
+```bash
+.venv\Scripts\python -m manhwa.soundbank --download
+```
+
 ## Utilisation
 
 Toutes les commandes s'écrivent `.venv\Scripts\python -m manhwa <commande>`.
@@ -204,8 +218,15 @@ visages, ton, sons) par rapport à tes choix, utilise `python -m manhwa bench <c
 
 #### Voix
 
-Chaque personnage a sa voix : **Proposer les voix** laisse GPT-4.1 la choisir d'après son
-genre, son caractère (wiki) et ses répliques. Sans GPT, les accents alternent, les hauteurs
+Avec Qwen3-TTS installé (`[tts] engine = "qwen"`), chaque personnage a une voix **décrite**
+(« jeune homme, voix basse, froide, sans émotion ») : GPT l'écrit d'après sa fiche, Qwen
+joue chaque réplique avec son émotion, puis la voix est ramenée au timbre du personnage pour
+rester la même d'une réplique à l'autre. ▶ fait entendre la voix, **Autre voix** en
+redemande une, **Modifier** pour l'écrire toi-même. Whisper réécoute chaque réplique : une
+réplique mal dite est refaite, puis dite par la voix de secours.
+
+Sans Qwen, **Proposer les voix** laisse GPT-4.1 choisir une voix d'après le
+genre, le caractère (wiki) et les répliques. Sans GPT, les accents alternent, les hauteurs
 sont décalées, et un personnage âgé selon le wiki parle plus grave. ▶ pour écouter, la
 liste pour changer, − / + pour une voix plus grave ou plus aiguë, **Valider**.
 
@@ -238,14 +259,24 @@ sert de référence au banc de mesure.
 
 #### Onglet Sons
 
-Chaque bruitage dessiné (SFX) et chaque case sans texte peut recevoir un son. Le Studio
-regarde d'abord chaque case avec CLIP (un modèle d'image, en local, sans clé : ≈ 15 s par
-chapitre) et affiche ce qu'il y voit (« Je vois : du feu, une lame ») avec 3 sons proposés.
-Un clic sur un son le joue et le choisit ; la case se range en bas au bout de 3 s.
-**Valider les propositions** fait le reste d'un coup. Les sons viennent de packs libres
-(CC0) de [Kenney](https://kenney.nl), téléchargés au premier usage (feu, vent, whoosh et
-cœur sont fabriqués) ; tes propres sons se rangent dans `sfx/<catégorie>/`. Le son part au
-début de sa case, sous la voix.
+En haut, **la bande-son de l'épisode** : chaque case qui peut avoir un son, dans l'ordre
+(violet : à choisir, vert : choisi, gris : sans son). Dessous, une case à la fois, en grand :
+**ce qui se passe** (« Personnage poussé, sang »), le son proposé (un ou deux sons ensemble)
+et pourquoi. **Valider** (Entrée), **Aucun son** (N), **Écouter avec la voix** (Espace),
+← → pour passer d'une case à l'autre ; « + » à côté d'une idée met les deux sons ensemble.
+La case suivante arrive au bout de 2 s, son bouton au même endroit (la souris qui bouge sur
+la case la retient).
+
+Pour proposer : un modèle local (Qwen3.5-2B) décrit chaque case, puis GPT choisit les sons
+d'après l'histoire, la force du moment (le volume suit) et ce qu'on doit entendre ; CLAP, un
+modèle qui écoute, prend dans la bibliothèque pro la prise la plus proche. Tes propres sons se
+rangent dans `sfx/<catégorie>/`.
+
+**Les lieux** : GPT coupe l'épisode en lieux (prison, marché, forêt…) ; chacun a une ambiance
+de fond, très basse, et les voix y résonnent comme dans le lieu. **L'image réagit** aux
+coups : zoom « punch », tremblement, flash ; pendant chaque case, la caméra glisse en relief
+(le premier plan bouge plus que le fond). Tout se règle dans `[render]` : `effects`, `depth`,
+`ambience`, `voice_space`, `loudness`.
 
 La **musique suit l'ambiance** : calme, tension, combat ou tristesse, d'après ce que
 montrent les cases et le ton des répliques. Elle change avec la scène, en fondu, et
@@ -256,14 +287,13 @@ zooment très légèrement, et chaque case pousse la précédente vers le haut c
 webtoon qu'on fait défiler (`[render]` dans config.toml : `zoom`, `pan`, `transition`,
 `music_volume`…).
 
-Avec une clé GPT, « Demander aussi à GPT » ajoute sa proposition pour les cases sans texte,
-d'après les répliques autour.
-
 #### Clé GPT
 
 La roue dentée en haut à gauche ouvre les **Réglages** : adresse du proxy, modèle et clé,
 enregistrés dans `.env` (jamais commité). La clé change chaque jour : colle la nouvelle
-ici, « Enregistrer et tester » vérifie qu'elle marche.
+ici, « Enregistrer et tester » vérifie qu'elle marche. Une clé **Claude** (Anthropic,
+console.anthropic.com) peut s'y ajouter : sans clé GPT, ou quand elle a expiré, Claude
+(Haiku 5.5) prend le relais.
 
 ## Dossier d'un chapitre
 
