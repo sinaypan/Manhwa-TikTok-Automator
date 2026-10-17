@@ -10,6 +10,8 @@
     - relief : pendant le zoom, le premier plan avance un peu plus que le fond (motion.depth_map) ;
     - le lieu (places.py) : une ambiance de fond sous chaque scène, et des voix qui résonnent comme le lieu ;
     - à la fin, tout le son est remis au niveau des vidéos en ligne ([render] loudness, en LUFS) ;
+    - le rythme du dialogue (rhythm.py) : qui répond, sur quel ton ([render] natural_rhythm) ;
+    - une case longue (≥ 7 s, plusieurs bulles) : la caméra va voir la bulle de chaque réplique ([render] guide) ;
     - une musique de fond (fichier dans music/ ou [render] music) tourne en boucle et
       baisse pendant que les personnages parlent.
 """
@@ -281,7 +283,7 @@ def run_render(chapter, cfg, force=False, progress=None):
         return False
 
     import cv2
-    from moviepy import CompositeAudioClip, concatenate_audioclips
+    from moviepy import CompositeAudioClip
 
     from manhwa.images import load_strip, read_image
     from manhwa.sfx import VOLUME, ensure_library, video_sounds
@@ -306,6 +308,9 @@ def run_render(chapter, cfg, force=False, progress=None):
         strip, _ = load_strip(chapter.pages(), cfg["slicer"]["max_src_width"])
 
     from manhwa import places as places_mod
+    from manhwa import rhythm
+
+    natural = bool(r.get("natural_rhythm", True))
 
     where = places_mod.frame_places(chapter, data)
     clips, audios, opened, durations, voiced, files, spoken = [], [], [], [], [], [], []
@@ -330,19 +335,26 @@ def run_render(chapter, cfg, force=False, progress=None):
         loaded = [(seg, _load_audio(voice_file(seg))) for seg in frame.get("segments") or []]
         loaded = [(seg, a) for seg, a in loaded if a]
         pieces = [a for _, a in loaded]
-        t_in, said = 0.0, []  # où commence chaque réplique dans la frame (sous-titres)
-        for seg, a in loaded:
+        t_in, said, starts_in = 0.0, [], []  # où commence chaque réplique dans la frame (sous-titres)
+        for k, (seg, a) in enumerate(loaded):
+            if k:  # le rythme du dialogue (rhythm.py) : qui répond, sur quel ton
+                t_in = max(starts_in[-1] + 0.3 * loaded[k - 1][1].duration,
+                           t_in + (rhythm.gap(loaded[k - 1][0], seg) if natural else GAP_SECONDS) / speed)
+            starts_in.append(t_in)
             said.append((seg.get("text") or "", t_in, a.duration, seg.get("words")))
-            t_in += a.duration + GAP_SECONDS / speed
+            t_in += a.duration
         if not pieces and frame.get("audio"):  # frame d'avant les voix par personnage
             pieces = [a for a in [_load_audio(chapter.root / frame["audio"])] if a]
+            starts_in = [0.0]
         opened += pieces
         voice = None
         if pieces:
-            gap = _silence(GAP_SECONDS / speed, pieces[0])
-            joined = [x for a in pieces for x in (a, gap)][:-1]
-            voice = concatenate_audioclips(joined) if len(joined) > 1 else pieces[0]
-        duration = voice.duration + r["padding_seconds"] / speed if voice else r["silent_frame_seconds"] / speed
+            end = max(t + a.duration for t, a in zip(starts_in, pieces))
+            voice = (CompositeAudioClip([a.with_start(t) for t, a in zip(starts_in, pieces)]).with_duration(end)
+                     if len(pieces) > 1 else pieces[0])
+        following = next(iter((data["frames"][i + 1].get("segments") or [None]) if i + 1 < len(data["frames"]) else [None]))
+        pad = rhythm.tail(loaded[-1][0], following) if natural and loaded else r["padding_seconds"]
+        duration = voice.duration + pad / speed if voice else r["silent_frame_seconds"] / speed
 
         hits = [(a, g) for a, g in ((_load_audio(p), g) for p, g in sounds.get(frame["file"], [])) if a]
         opened += [a for a, _ in hits]
@@ -353,8 +365,20 @@ def run_render(chapter, cfg, force=False, progress=None):
         audio = CompositeAudioClip(layers).with_duration(duration) if layers else None
 
         tall = _tall_image(strip, frame["crop"], out_w) if pan else None
+        def bubble_times():
+            from manhwa.review import effective
+
+            where_box = {b["text"]: b["box"] for b in effective(frame) if b.get("box")}
+            return [(start, where_box[text]) for text, start, _, _ in said if text in where_box]
+
+        guided = duration >= motion.LONG_CASE and len(said) >= 2 and r.get("guide", True)
         if tall is not None and tall.shape[0] > out_h:
-            clip = pan_clip(tall, out_h, duration)
+            times = bubble_times() if guided else []
+            if len(times) >= 2:  # case haute et longue : elle défile jusqu'à la bulle de chaque réplique
+                f = tall.shape[1] / frame["crop"][2]
+                clip = motion.guided_pan_clip(tall, out_h, duration, [(max(0.0, s - 0.3), (b[1] + b[3] / 2) * f) for s, b in times])
+            else:
+                clip = pan_clip(tall, out_h, duration)
         else:
             rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             depth = None
@@ -365,7 +389,14 @@ def run_render(chapter, cfg, force=False, progress=None):
                 except Exception as e:  # sans le modèle : le zoom simple
                     print(f"  [!] Relief indisponible ({e})")
                     r = {**r, "depth": False}
-            if depth is not None:
+            guide = []
+            if guided:  # case longue : la caméra va voir la bulle de chaque réplique (motion.guided_clip)
+                times = bubble_times()
+                if len(times) >= 2:
+                    guide = motion.guide_keys(motion.panel_rect(rgb, frame["crop"][2:4]), frame["crop"][2], times, duration)
+            if guide:
+                clip = motion.guided_clip(rgb, duration, guide)
+            elif depth is not None:
                 clip = motion.depth_zoom_clip(rgb, depth, duration, zoom, zoom_in=i % 2 == 0)
             else:
                 clip = zoom_clip(rgb, duration, zoom, zoom_in=i % 2 == 0) if zoom > 0 else zoom_clip(rgb, duration, 0)

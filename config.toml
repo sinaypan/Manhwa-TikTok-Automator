@@ -51,6 +51,8 @@ ambience = true           # une ambiance de fond par lieu (prison, forêt, march
 ambience_volume = 0.13    # le fond reste discret, surtout sans voix par-dessus
 voice_space = true        # les voix prennent de la chaleur et résonnent comme le lieu
 loudness = -14            # niveau final du son (LUFS, comme TikTok) ; 0 = laisser tel quel
+natural_rhythm = true     # blancs selon le dialogue (qui répond, colère, tristesse) au lieu d'un blanc fixe
+guide = true              # case longue : la caméra va voir la bulle de celui qui parle
 captions = true           # sous-titres karaoké (le mot dit passe en jaune)
 captions_words = 4        # mots affichés ensemble
 captions_font = ""        # chemin d'une police .ttf ; vide = Impact (ou une autre police grasse de Windows)

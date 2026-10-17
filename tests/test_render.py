@@ -105,3 +105,35 @@ def test_slide_transition_pushes_the_previous_frame_up():
     assert video.get_frame(1.5)[0, 0].tolist() == [0, 0, 255]
     fade, _ = render.timeline([a, b], [1.0, 1.0], "fade", 0.3)
     assert 0 < fade.get_frame(1.15)[0, 0, 0] < 255
+
+
+def test_dialogue_rhythm_follows_who_answers_and_how():
+    from manhwa import rhythm
+
+    a = {"speaker": "c1", "emotion": "neutral", "text": "WE SHOULD GO NOW."}
+    same = {"speaker": "c1", "emotion": "neutral", "text": "BEFORE THEY COME BACK."}
+    other = {"speaker": "c2", "emotion": "neutral", "text": "WHY?"}
+    assert rhythm.gap(a, same) < rhythm.gap(a, other)  # il continue : plus court qu'une réponse
+    assert rhythm.gap(other, a) < rhythm.gap(a, other)  # une réponse à une question vient vite
+    angry1, angry2 = dict(a, emotion="angry"), dict(other, emotion="shouting")
+    assert rhythm.gap(angry1, angry2) < 0  # dispute : on se coupe la parole
+    sad = dict(a, emotion="sad", text="SHE IS GONE...")
+    assert rhythm.gap(sad, other) > rhythm.gap(a, other) and rhythm.tail(sad) > rhythm.tail(a)
+    assert rhythm.tail(dict(a, text="RUN!")) > rhythm.tail(a)  # on laisse le cri retomber
+    assert rhythm.tail(a, same) < rhythm.tail(a)  # il continue sur la case suivante
+
+
+def test_long_cases_follow_the_bubbles():
+    import numpy as np
+
+    from manhwa import motion
+
+    keys = motion.guide_keys((100, 200, 800, 600), 400, [(0.0, (0, 0, 40, 40)), (4.0, (300, 250, 60, 40))], 9.0)
+    assert keys[0][1:3] == (100 + 20 * 2, 200 + 20 * 2) and keys[1][0] == 3.75 and keys[-1][0] == 9.0
+    img = np.zeros((400, 300, 3), np.uint8)
+    img[:, 150:] = 255
+    clip = motion.guided_clip(img, 9.0, motion.guide_keys((0, 0, 300, 400), 300, [(0.0, (0, 0, 40, 40)), (4.0, (260, 360, 40, 40))], 9.0))
+    assert clip.get_frame(0.0).shape == img.shape and clip.get_frame(8.0).mean() > clip.get_frame(0.5).mean()  # vers la droite, blanche
+    tall = np.repeat((np.arange(1000) % 256).astype(np.uint8)[:, None, None], 10, axis=1).repeat(3, axis=2)
+    pan = motion.guided_pan_clip(tall, 200, 9.0, [(0.5, 150.0), (4.0, 900.0)])
+    assert pan.get_frame(0.0).shape[0] == 200 and pan.get_frame(8.5)[0, 0, 0] == 800 % 256  # au bout : la seconde bulle

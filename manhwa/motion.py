@@ -226,3 +226,82 @@ def depth_zoom_clip(image, depth, duration, amount, zoom_in=True):
                          cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT101)
 
     return VideoClip(frame, duration=duration)
+
+
+# ---------- Case longue : la caméra va voir la bulle de celui qui parle ----------
+LONG_CASE = 7.0  # s : au-delà, et avec plusieurs bulles, la caméra suit les répliques
+GUIDE_ZOOM = 1.14  # de combien elle s'approche d'une bulle
+
+
+def guide_keys(rect, crop_w, boxes_times, duration):
+    """[(instant, x, y, zoom)] : la caméra passe d'une bulle à l'autre, au rythme des répliques.
+
+    rect : la case dans la frame ; boxes_times : [(début de la réplique, boîte de sa bulle)] (repère de la case).
+    """
+    x0, y0, w, _ = rect
+    f = w / max(1, crop_w)
+    keys = []
+    for t, (bx, by, bw, bh) in boxes_times:
+        keys.append((max(0.0, t - 0.25), x0 + (bx + bw / 2) * f, y0 + (by + bh / 2) * f, GUIDE_ZOOM))
+    if not keys:
+        return []
+    return keys + [(duration, keys[-1][1], keys[-1][2], GUIDE_ZOOM * 1.02)]
+
+
+def guided_clip(image, duration, keys):
+    """La case, la caméra glissant d'une bulle à l'autre (fondu doux entre deux points)."""
+    import cv2
+    import numpy as np
+    from moviepy import VideoClip
+
+    from manhwa.render import _ease
+
+    h, w = image.shape[:2]
+    start = (0.0, w / 2, h / 2, 1.04)
+    keys = [start] + [k for k in keys if k[0] > 0.05] if keys and keys[0][0] > 0.05 else keys or [start]
+
+    def at(t):
+        k = 0
+        while k + 1 < len(keys) and keys[k + 1][0] <= t:
+            k += 1
+        if k + 1 >= len(keys):
+            return keys[-1][1:]
+        a, b = keys[k], keys[k + 1]
+        p = _ease(min(1.0, (t - a[0]) / max(0.6, min(1.2, b[0] - a[0]))))  # on y va en ≈ 1 s, puis on reste
+        return tuple(a[i] + (b[i] - a[i]) * p for i in (1, 2, 3))
+
+    def frame(t):
+        cx, cy, z = at(float(t))
+        # le point visé vient vers le centre, sans jamais montrer de bord vide
+        half_w, half_h = w / (2 * z), h / (2 * z)
+        cx = min(max(cx, half_w), w - half_w)
+        cy = min(max(cy, half_h), h - half_h)
+        m = np.float32([[z, 0, w / 2 - z * cx], [0, z, h / 2 - z * cy]])
+        return cv2.warpAffine(image, m, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT101)
+
+    return VideoClip(frame, duration=duration)
+
+
+def guided_pan_clip(tall, out_h, duration, keys):
+    """Une case haute qui défile jusqu'à la bulle de chaque réplique (keys : [(instant, y du centre visé)])."""
+    from moviepy import VideoClip
+
+    from manhwa.render import _ease
+
+    travel = max(0, tall.shape[0] - out_h)
+    stops = [(0.0, 0.0)] + [(t, min(travel, max(0.0, y - out_h / 2))) for t, y in keys]
+
+    def at(t):
+        k = 0
+        while k + 1 < len(stops) and stops[k + 1][0] <= t:
+            k += 1
+        if k + 1 >= len(stops):
+            return stops[-1][1]
+        (ta, ya), (tb, yb) = stops[k], stops[k + 1]
+        return ya + (yb - ya) * _ease(min(1.0, (t - ta) / max(0.6, min(1.4, tb - ta))))
+
+    def frame(t):
+        y = round(at(float(t)))
+        return tall[y:y + out_h]
+
+    return VideoClip(frame, duration=duration)
