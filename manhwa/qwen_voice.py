@@ -269,8 +269,10 @@ def _render_lines(chapter, data, segs, progress, tries):
         with tempfile.TemporaryDirectory() as tmp:
             refs = {d: reference(chapter, d) for d in {s["design"] for s in batch}}
             raws = {}
-            for s in batch:  # 1. Qwen, avec l'émotion (un seul modèle chargé à la fois)
+            for k, s in enumerate(batch):  # 1. Qwen, avec l'émotion (un seul modèle chargé à la fois)
                 raw = os.path.join(tmp, f"{s['audio_key']}.wav")
+                if attempt == 0 and progress:
+                    progress(k, 2 * total)  # la barre avance dès Qwen (la conversion fait la seconde moitié)
                 try:
                     _ask("qwen", {"text": sentence_case(s["text"]), "out": raw,
                                   "instruct": f"{s['design']}. {EMOTION.get(s.get('emotion') or 'neutral', '')}",
@@ -293,7 +295,7 @@ def _render_lines(chapter, data, segs, progress, tries):
                     done[0] += 1
                     print(f"  [OK] qwen {s.get('emotion')} | {s['text'][:50]}")
                     if progress:
-                        progress(done[0], total)
+                        progress(total + done[0], 2 * total)
         close()
 
     try:
