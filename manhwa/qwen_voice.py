@@ -54,6 +54,22 @@ FALLBACK = {
           "Teenage girl, bright and quick voice", "Older woman, calm and dignified voice",
           "Woman, cold and sharp voice", "Soft-spoken young woman, gentle voice"],
 }
+# répliques dites ensemble par Qwen. Mesuré sur 28 répliques (RTX 3050) : 4 → 88 s, 5 → 64 s, 6 → 53 s,
+# 7 → 43 s (5,4 Go) ; au-delà, pas mieux et la carte approche de ses 6 Go. Un paquet garde moins de
+# BATCH_CHARS lettres : les longues narrations vont par plus petits paquets.
+BATCH = 7
+BATCH_CHARS = 600
+
+
+def groups(segs):
+    """Les répliques en paquets, de longueur voisine (une courte n'attend pas une longue)."""
+    out, cur = [], []
+    for s in sorted(segs, key=lambda s: len(s["text"])):
+        if cur and (len(cur) >= BATCH or sum(len(x["text"]) for x in cur) + len(s["text"]) > BATCH_CHARS):
+            out.append(cur)
+            cur = []
+        cur.append(s)
+    return out + ([cur] if cur else [])
 _WORKERS = {}
 _BUSY = threading.Lock()  # un seul usage à la fois (création de la vidéo, ou extrait dans le Studio)
 
@@ -269,17 +285,26 @@ def _render_lines(chapter, data, segs, progress, tries):
         with tempfile.TemporaryDirectory() as tmp:
             refs = {d: reference(chapter, d) for d in {s["design"] for s in batch}}
             raws = {}
-            for k, s in enumerate(batch):  # 1. Qwen, avec l'émotion (un seul modèle chargé à la fois)
-                raw = os.path.join(tmp, f"{s['audio_key']}.wav")
+            # 1. Qwen, avec l'émotion, par paquets de répliques de longueur voisine (un seul modèle chargé à la fois)
+            made = 0
+            for group in groups(batch):
                 if attempt == 0 and progress:
-                    progress(k, 2 * total)  # la barre avance dès Qwen (la conversion fait la seconde moitié)
+                    progress(made, 2 * total)  # la barre avance dès Qwen (la conversion fait la seconde moitié)
+                made += len(group)
+                jobs = [{"text": sentence_case(s["text"]), "out": os.path.join(tmp, f"{s['audio_key']}.wav"),
+                         "instruct": f"{s['design']}. {EMOTION.get(s.get('emotion') or 'neutral', '')}"} for s in group]
+                seed = zlib.crc32(f"{'|'.join(s['audio_key'] for s in group)}:{attempt}".encode())
                 try:
-                    _ask("qwen", {"text": sentence_case(s["text"]), "out": raw,
-                                  "instruct": f"{s['design']}. {EMOTION.get(s.get('emotion') or 'neutral', '')}",
-                                  "seed": zlib.crc32(f"{s['audio_key']}:{attempt}".encode())})
-                    raws[s["audio_key"]] = raw
-                except Exception as e:
-                    print(f"  [!] Qwen : {e} : {s['text'][:40]}")
+                    _ask("qwen", {"batch": jobs, "seed": seed})
+                    raws.update({s["audio_key"]: j["out"] for s, j in zip(group, jobs)})
+                except Exception as e:  # le paquet raté : une à une
+                    print(f"  [!] Qwen ({e}) : réplique par réplique")
+                    for s, j in zip(group, jobs):
+                        try:
+                            _ask("qwen", {**j, "seed": seed})
+                            raws[s["audio_key"]] = j["out"]
+                        except Exception as e2:
+                            print(f"  [!] Qwen : {e2} : {s['text'][:40]}")
             for s in batch:  # 2. le timbre du personnage, 3. vitesse et volume
                 raw = raws.get(s["audio_key"])
                 if not raw:

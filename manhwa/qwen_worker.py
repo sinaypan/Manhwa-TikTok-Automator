@@ -3,6 +3,7 @@
 À part, comme chatterbox_worker.py : qwen-tts veut une autre version de transformers.
 Une demande JSON par ligne sur l'entrée standard, une réponse par ligne :
     {"text", "instruct" (la voix décrite, et l'émotion), "out" (.wav), "seed"} → {"ok"} | {"error"}
+    {"batch": [{"text", "instruct", "out"}, …], "seed"} → {"ok"} : plusieurs à la fois (≈ 2 fois plus vite à 4)
 Il s'arrête quand l'entrée se ferme : la carte graphique est libérée.
 N'importe rien de manhwa : il tourne dans un autre environnement Python.
 """
@@ -33,10 +34,13 @@ def main():
         try:
             job = json.loads(line)
             torch.manual_seed(int(job.get("seed", 0)))
-            wavs, sr = model.generate_voice_design(text=job["text"], language="English", instruct=job["instruct"])
-            tmp = job["out"] + ".part.wav"
-            sf.write(tmp, wavs[0], sr)
-            os.replace(tmp, job["out"])
+            batch = job.get("batch") or [job]
+            wavs, sr = model.generate_voice_design(text=[b["text"] for b in batch], language=["English"] * len(batch),
+                                                   instruct=[b["instruct"] for b in batch])
+            for b, wav in zip(batch, wavs):
+                tmp = b["out"] + ".part.wav"
+                sf.write(tmp, wav, sr)
+                os.replace(tmp, b["out"])
             print(json.dumps({"ok": True}), flush=True)
         except Exception as e:  # une réplique ratée n'arrête pas les autres
             print(json.dumps({"error": str(e)[:300]}), flush=True)

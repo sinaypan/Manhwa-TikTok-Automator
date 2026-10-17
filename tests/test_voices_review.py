@@ -361,3 +361,14 @@ def test_without_gpt_each_character_gets_a_different_voice_asked_again_later(mon
     monkeypatch.setattr(llm, "chat", lambda *a, **k: {"voices": [{"id": "c2", "voice": "Gruff old smuggler, natural and human"}]})
     qwen_voice.ensure_designs(Ch(), crew)  # la clé est revenue : GPT redécrit
     assert crew["designs"]["c2"] == "Gruff old smuggler, natural and human" and "c2" not in crew["designs_auto"]
+
+
+def test_qwen_groups_lines_by_length_within_limits():
+    from manhwa import qwen_voice
+
+    segs = [{"text": "x" * n} for n in (300, 5, 250, 8, 12, 9, 7, 6, 10, 11, 280)]
+    groups = qwen_voice.groups(segs)
+    assert sum(len(g) for g in groups) == len(segs)
+    assert all(len(g) <= qwen_voice.BATCH for g in groups)
+    assert all(sum(len(s["text"]) for s in g) <= qwen_voice.BATCH_CHARS or len(g) == 1 for g in groups)
+    assert [len(s["text"]) for s in groups[0]] == [5, 6, 7, 8, 9, 10, 11]  # les courtes ensemble
