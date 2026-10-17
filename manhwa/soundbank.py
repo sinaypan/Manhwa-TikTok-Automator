@@ -65,16 +65,30 @@ PROMPTS = {
     "magic": "a magical spell shimmer",
     "whoosh": "a fast whoosh swoosh",
 }
+# d'autres façons de dire la même chose : CLAP compare à la moyenne (plus juste qu'une seule phrase)
+MORE_PROMPTS = {
+    "slam": ["a heavy body falling hard on the ground", "a violent body impact, bodyfall"],
+    "fall": ["a body falling on the floor, bodyfall", "someone collapsing to the ground"],
+    "metal": ["a sword blade hitting another blade", "a metal clang", "chains rattling"],
+    "cloth": ["clothes rustling", "a cape flapping", "fabric movement"],
+    "wood": ["a wooden plank breaking", "knocking on wood", "wood creaking"],
+    "bell": ["a temple gong", "a bell ringing"],
+    "heartbeat": ["a heart beating, thump thump"],
+    "wind": ["a strong wind gust", "wind howling"],
+}
 # ce qu'on écarte (une prise plus proche de ça que d'un bruitage utile)
 REJECT = ["music", "people talking, speech", "a car or motorcycle engine", "a gunshot", "a robot voice",
           "room tone, quiet ambience", "electronic beeps, 8-bit game sounds"]
 # le nom du fichier aide CLAP (« Punch_Heavy_03.wav » est sans doute un coup de poing)
 NAME_HINTS = {
-    "punch": r"punch|fist|kick", "slam": r"body ?fall|bodyfall|slam", "slash": r"slash|stab|slice|cut",
-    "blade_draw": r"unsheath|sheath|draw", "metal": r"sword|clang|clash|metal", "blood": r"blood|gore|splat|squelch|flesh|guts|bone",
-    "whoosh": r"whoosh|swoosh|swish|woosh", "footsteps": r"footstep|step", "cloth": r"cloth|fabric", "door": r"door",
-    "fire": r"fire|flame", "thunder": r"thunder", "explosion": r"explo", "glass": r"glass|shatter", "bell": r"bell|gong",
-    "paper": r"paper|book", "coins": r"coin", "impact": r"impact|hit|thud|thump",
+    "fall": r"body ?fall|bodyfall", "punch": r"punch|fist|kick", "slam": r"body ?slam|slam|crash into",
+    "slash": r"slash|stab|slice|cut", "heartbeat": r"heart ?beat|heartbeat|stethoscope.*heart",
+    "wind": r"wind[ ,_].*(gust|howl|rushing|breeze)|wind gust|gusts", "bell": r"\bbell\b|gong",
+    "blade_draw": r"unsheath|sheath", "metal": r"sword|clang|clash|metal.*(hit|crash|impact)|chain|parry|shield",
+    "cloth": r"cloth|fabric|clothing|umbrella", "wood": r"wood|plank|branch|tree limb|crate",
+    "blood": r"blood|gore|splat|squelch|flesh|guts|bone", "whoosh": r"whoosh|swoosh|swish|woosh",
+    "footsteps": r"footstep|step", "door": r"door", "fire": r"fire|flame", "thunder": r"thunder", "explosion": r"explo",
+    "glass": r"glass|shatter", "paper": r"paper|book", "coins": r"coin", "impact": r"impact|hit|thud|thump",
 }
 _WORKER = {}
 _LOCK = threading.Lock()
@@ -229,25 +243,9 @@ def prepare(progress=None):
             progress(i + 1, 2 * len(files))
     from manhwa.sfx import CATEGORIES
 
-    cats = [c for c in PROMPTS if c in CATEGORIES]
     vecs = embed_audio([folder / "takes" / r["file"] for r in rows])
-    text = embed_texts([PROMPTS[c] for c in cats] + REJECT)
-    sims = vecs @ text.T
-    keep = []
-    for r, s in zip(rows, sims):
-        good = s[:len(cats)].copy()
-        hint = _hint(r["src"])
-        if hint in cats:
-            good[cats.index(hint)] += 0.05
-        best = int(good.argmax())
-        if r["user_cat"] in CATEGORIES:  # rangé à la main dans sfx/<catégorie>/ : on respecte
-            r["cat"] = r["user_cat"]
-        elif good[best] < s[len(cats):].max() or good[best] < 0.15:
-            r["cat"] = None  # musique, voix, moteur… : écarté
-        else:
-            r["cat"] = cats[best]
-        r["score"] = round(float(good[best]), 3)
-        keep.append(r)
+    keep = _classify(rows, vecs)
+    keep, vecs = _layer_slams(folder, keep, vecs)
     np.save(folder / "vectors.npy", vecs.astype(np.float16))
     (folder / "index.json").write_text(json.dumps({"version": BANK_VERSION, "takes": keep}, ensure_ascii=False),
                                        encoding="utf-8")
@@ -256,6 +254,80 @@ def prepare(progress=None):
         progress(1, 1)
     _BANK.clear()
     return sum(1 for r in keep if r["cat"])
+
+
+def _classify(rows, vecs):
+    """Range chaque prise : la catégorie que CLAP entend le mieux, aidé par le nom du fichier."""
+    from manhwa.sfx import CATEGORIES
+
+    cats = [c for c in PROMPTS if c in CATEGORIES]
+    texts = [PROMPTS[c] for c in cats]
+    owner = list(range(len(cats)))
+    for c, extra in MORE_PROMPTS.items():
+        if c in cats:
+            texts += extra
+            owner += [cats.index(c)] * len(extra)
+    text = embed_texts(texts + REJECT)
+    sims_all = vecs @ text.T
+    owner = np.array(owner)
+    for r, s in zip(rows, sims_all):
+        good = np.array([s[:len(owner)][owner == k].mean() for k in range(len(cats))])
+        hint = _hint(r["src"])
+        best = int(good.argmax())
+        # le nom du fichier le dit (« bodyfall », « Cloth 61 ») et CLAP ne le contredit pas franchement : on le croit
+        named = hint in cats and good[cats.index(hint)] >= max(0.08, good[best] - 0.12)
+        if named:
+            best = cats.index(hint)
+            good[best] = max(good[best], MIN_SCORE)
+        if r.get("user_cat") in CATEGORIES:  # rangé à la main dans sfx/<catégorie>/ : on respecte
+            r["cat"] = r["user_cat"]
+        elif named:
+            r["cat"] = cats[best]
+        elif good[best] < s[len(owner):].max() or good[best] < 0.15:
+            r["cat"] = None  # musique, voix, moteur… : écarté
+        else:
+            r["cat"] = cats[best]
+        r["score"] = round(float(good[best]), 3)
+    return rows
+
+
+def _layer_slams(folder, rows, vecs, n=6):
+    """« Projeté contre un mur » manque dans les packs : un gros coup et une chute de corps, mêlés."""
+    def best(cat, k):
+        found = sorted((r for r in rows if r["cat"] == cat), key=lambda r: -r["score"])[:k]
+        return [_decode(folder / "takes" / r["file"]) for r in found]
+
+    hits, falls = best("punch", 4) + best("impact", 2), best("fall", 4)
+    if not hits or not falls or sum(1 for r in rows if r["cat"] == "slam" and r["score"] >= MIN_SCORE) >= MIN_TAKES:
+        return rows, vecs
+    made = []
+    for k in range(n):
+        a, b = hits[k % len(hits)], falls[k % len(falls)]
+        y = np.zeros(max(len(a), len(b) + int(0.04 * RATE)), np.float32)
+        y[:len(a)] += a
+        y[int(0.04 * RATE):int(0.04 * RATE) + len(b)] += 0.9 * b
+        tt = np.arange(len(y)) / RATE
+        y += 0.5 * np.sin(2 * np.pi * 50 * tt) * np.exp(-tt * 10) * TARGET_RMS * 4  # le grave du choc
+        name = f"slam_layer_{k}.wav"
+        _write(folder / "takes" / name, _level(y))
+        made.append({"file": name, "src": name, "pack": "fabriqué", "dur": round(len(y) / RATE, 2), "user_cat": None,
+                     "cat": "slam", "score": MIN_SCORE})
+    new = embed_audio([folder / "takes" / r["file"] for r in made])
+    return rows + made, np.concatenate([vecs, new])
+
+
+def reclassify():
+    """Range de nouveau les prises déjà écoutées (les phrases ou les règles ont changé), sans tout réécouter."""
+    index = json.loads((bank_dir() / "index.json").read_text(encoding="utf-8"))
+    vecs = np.load(bank_dir() / "vectors.npy").astype(np.float32)
+    try:
+        rows = _classify(index["takes"], vecs)
+    finally:
+        close()
+    (bank_dir() / "index.json").write_text(json.dumps({"version": BANK_VERSION, "takes": rows}, ensure_ascii=False),
+                                           encoding="utf-8")
+    _BANK.clear()
+    return sum(1 for r in rows if r["cat"])
 
 
 _BANK = {}
