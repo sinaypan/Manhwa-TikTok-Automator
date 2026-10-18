@@ -65,26 +65,27 @@ def apply(clip, fx):
     """La case avec ses effets (rien à faire si fx est vide)."""
     if not fx:
         return clip
+
+    return clip.transform(lambda get_frame, t: fx_frame(get_frame(t), t, fx))
+
+
+def fx_frame(img, t, fx):
+    """Une image avec le tremblement, le zoom « punch » et le flash du coup (t : depuis le début de la case)."""
     import cv2
     import numpy as np
 
     shake, flash, punch = fx.get("shake", 0), fx.get("flash", 0), fx.get("punch", 0)
-
-    def frame(get_frame, t):
-        img = get_frame(t)
-        dx, dy = offset(t, shake)
-        z = punch_at(t, punch)
-        if dx or dy or z:
-            h, w = img.shape[:2]
-            s = 1.04 + z  # un peu zoomé : le tremblement ne montre pas de bord vide
-            m = np.float32([[s, 0, dx + (1 - s) * w / 2], [0, s, dy + (1 - s) * h / 2]])
-            img = cv2.warpAffine(img, m, (w, h), borderMode=cv2.BORDER_REFLECT101)
-        a = flash_at(t, flash)
-        if a > 0.01:
-            img = (img.astype(np.float32) * (1 - a) + 255 * a).astype(np.uint8)
-        return img
-
-    return clip.transform(frame)
+    dx, dy = offset(t, shake)
+    z = punch_at(t, punch)
+    if dx or dy or z:
+        h, w = img.shape[:2]
+        s = 1.04 + z  # un peu zoomé : le tremblement ne montre pas de bord vide
+        m = np.float32([[s, 0, dx + (1 - s) * w / 2], [0, s, dy + (1 - s) * h / 2]])
+        img = cv2.warpAffine(img, m, (w, h), borderMode=cv2.BORDER_REFLECT101)
+    a = flash_at(t, flash)
+    if a > 0.01:
+        img = (img.astype(np.float32) * (1 - a) + 255 * a).astype(np.uint8)
+    return img
 
 
 # ---------- Profondeur : le premier plan avance un peu plus que le fond ----------

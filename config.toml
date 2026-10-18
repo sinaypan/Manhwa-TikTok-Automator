@@ -54,6 +54,8 @@ loudness = -14            # niveau final du son (LUFS, comme TikTok) ; 0 = laiss
 natural_rhythm = true     # blancs selon le dialogue (qui répond, colère, tristesse) au lieu d'un blanc fixe
 guide = true              # case longue : la caméra va voir la bulle de celui qui parle
 talk = true               # visages qui parlent : la bouche bat à chaque syllabe, les yeux clignent (onglet Personnages)
+layout = "scroll"         # "scroll" : la planche défile de case en case (scroll.py) ; "cases" : une case par image
+scroll_fit = true         # en défilement, la case lue remplit la largeur de l'écran (zoom en glissant)
 captions = true           # sous-titres karaoké (le mot dit passe en jaune)
 captions_words = 4        # mots affichés ensemble
 captions_font = ""        # chemin d'une police .ttf ; vide = Impact (ou une autre police grasse de Windows)

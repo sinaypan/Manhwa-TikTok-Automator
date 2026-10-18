@@ -290,6 +290,12 @@ coups : zoom « punch », tremblement, flash ; pendant chaque case, la caméra g
 (le premier plan bouge plus que le fond). Tout se règle dans `[render]` : `effects`, `depth`,
 `ambience`, `voice_space`, `loudness`.
 
+**La planche défile** (`[render] layout = "scroll"`, par défaut) : comme sur un téléphone, la
+vidéo glisse de case en case au lieu de montrer une case par image ; la caméra zoome pour que la
+case lue remplisse la largeur (`scroll_fit`), s'arrête dessus le temps des répliques, et sur une
+case plus haute que l'écran va voir la bulle de chaque réplique. Rien n'est coupé : les blancs
+(ou noirs) entre les cases sont ceux de l'auteur. `layout = "cases"` revient à une case par image.
+
 La **musique suit l'ambiance** : calme, tension, combat ou tristesse, d'après ce que
 montrent les cases et le ton des répliques. Elle change avec la scène, en fondu, et
 baisse quand on parle. Tes morceaux vont dans `music/calm/`, `music/tension/`,

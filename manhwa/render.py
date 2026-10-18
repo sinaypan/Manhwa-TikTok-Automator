@@ -212,6 +212,40 @@ def timeline(clips, durations, kind="slide", seconds=0.3):
     return VideoClip(frame, duration=total), starts
 
 
+def _scroll(chapter, strip, reading, durations, out_w, out_h, r, face_parts, faces_of):
+    """La planche entière qui défile de case en case (scroll.py), avec le relief et les visages qui parlent."""
+    import cv2
+
+    from manhwa import motion, scroll
+
+    k = out_w / strip.shape[1]
+    big = cv2.cvtColor(cv2.resize(strip, (out_w, round(strip.shape[0] * k)), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
+    starts, panels, t = [], [], 0.0
+    for (frame, i, duration, times, lines, fx), d in zip(reading, durations):
+        p = scroll.Panel(frame["crop"], k, t, d, fx=fx)
+        p.bubbles = [(s, p.y + (b[1] + b[3] / 2) * k) for s, b in times]
+        sides = [(p.x + b["box"][0] * k, p.x + (b["box"][0] + b["box"][2]) * k) for b in frame.get("bubbles") or [] if b.get("box")]
+        p.span = (max(0, min([p.x] + [a for a, _ in sides])), min(out_w, max([p.x + p.w] + [b for _, b in sides])))
+        image = big[p.y:p.y + p.h, p.x:p.x + p.w]
+        if r.get("depth", True) and float(r.get("zoom", 0.04)) > 0 and p.h >= 16 and p.w >= 16:
+            try:
+                boxes = [b["box"] for b in frame.get("bubbles") or []]  # les bulles bougent d'un bloc
+                p.depth = motion.cached_depth(chapter.root / STUDIO_DIR / "depth", image, frame["crop"], boxes)
+            except Exception as e:
+                print(f"  [!] Relief indisponible ({e})")
+        if lines and faces_of and frame["file"] in faces_of:
+            from manhwa import talk
+
+            try:
+                p.anim = talk.animator(chapter, image, k, (0, 0), faces_of[frame["file"]], face_parts, lines, seed=i)
+            except Exception as e:
+                print(f"  [!] Visage qui parle ignoré ({frame['file']} : {e})")
+        panels.append(p)
+        starts.append(t)
+        t += d
+    return scroll.scroll_clip(big, panels, out_w, out_h, t, fit=bool(r.get("scroll_fit", True))), starts
+
+
 def _tall_image(strip, crop, out_w):
     """La case découpée dans le chapitre, mise à la largeur de la vidéo (None si elle n'est pas haute)."""
     import cv2
@@ -319,9 +353,11 @@ def run_render(chapter, cfg, force=False, progress=None):
         reacts = video_hits(chapter, data, cfg) if r.get("effects", True) else {}
     except Exception as e:
         print(f"  [!] Bruitages indisponibles ({e}) : vidéo sans bruitages")
+    scrolling = r.get("layout", "cases") == "scroll"  # la planche qui défile (scroll.py) au lieu d'une case par image
     strip = None
-    if pan and any(f["crop"][3] / max(1, f["crop"][2]) > TALL for f in data["frames"]):
+    if scrolling or (pan and any(f["crop"][3] / max(1, f["crop"][2]) > TALL for f in data["frames"])):
         strip, _ = load_strip(chapter.pages(), cfg["slicer"]["max_src_width"])
+    reading = []  # défilement : ce qu'il faut savoir de chaque case
 
     from manhwa import places as places_mod
     from manhwa import rhythm
@@ -400,7 +436,10 @@ def run_render(chapter, cfg, force=False, progress=None):
             return [(start, where_box[text]) for text, start, _, _ in said if text in where_box]
 
         guided = duration >= motion.LONG_CASE and len(said) >= 2 and r.get("guide", True)
-        if tall is not None and tall.shape[0] > out_h:
+        if scrolling:  # la vidéo se fait d'un bloc après la boucle (scroll.scroll_clip)
+            reading.append((frame, i, duration, bubble_times(), lines, motion.effects(reacts.get(frame["file"], []))))
+            clip = None
+        elif tall is not None and tall.shape[0] > out_h:
             times = bubble_times() if guided else []
             if len(times) >= 2:  # case haute et longue : elle défile jusqu'à la bulle de chaque réplique
                 f = tall.shape[1] / frame["crop"][2]
@@ -431,7 +470,8 @@ def run_render(chapter, cfg, force=False, progress=None):
                 clip = motion.depth_zoom_clip(rgb, depth, duration, zoom, zoom_in=i % 2 == 0, anim=anim)
             else:
                 clip = zoom_clip(rgb, duration, max(zoom, 0), zoom_in=i % 2 == 0, anim=anim)
-        clip = motion.apply(clip, motion.effects(reacts.get(frame["file"], [])))  # tremblement, flash sur les coups
+        if clip is not None:
+            clip = motion.apply(clip, motion.effects(reacts.get(frame["file"], [])))  # tremblement, flash sur les coups
         clips.append(clip)
         audios.append(audio)
         durations.append(duration)
@@ -446,7 +486,10 @@ def run_render(chapter, cfg, force=False, progress=None):
     tmp = chapter.root / "video.part.mp4"
     print(f"  Rendu de {len(clips)} frames ({sum(durations) / 60:.1f} min)...")
     try:
-        final, starts = timeline(clips, durations, r.get("transition", "slide"), float(r.get("transition_seconds", 0.3)))
+        if scrolling:
+            final, starts = _scroll(chapter, strip, reading, durations, out_w, out_h, r, talking and face_parts, talking and faces_of)
+        else:
+            final, starts = timeline(clips, durations, r.get("transition", "slide"), float(r.get("transition_seconds", 0.3)))
         path = music_file(cfg)
         music = None
         if r.get("music_moods", True) and not (r.get("music") or "").strip():
