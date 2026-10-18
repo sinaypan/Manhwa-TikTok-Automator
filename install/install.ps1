@@ -4,13 +4,14 @@ Installe Manhwa Studio (lancé par Installer.bat, à la racine du projet).
     Installer.bat                  demande « complet » ou « léger »
     Installer.bat -Profil complet  tout : le Studio et les modèles IA locaux (carte NVIDIA de 6 Go ou plus)
     Installer.bat -Profil leger    le Studio seul : lecture du texte, voix de base, vidéo (n'importe quel PC)
+    Installer.bat -Profil auto     sans question : complet si la carte le permet, sinon léger (install/get.ps1)
     Installer.bat -SansModeles     les modèles se téléchargeront au premier usage au lieu de maintenant
 
 Relancer l'installateur met tout à jour sans rien perdre : les chapitres (inbox/), la clé (.env)
 et les modèles déjà téléchargés (.cache/) restent.
 #>
 param(
-    [ValidateSet("", "complet", "leger")] [string]$Profil = "",
+    [ValidateSet("", "auto", "complet", "leger")] [string]$Profil = "",
     [switch]$SansModeles,    # les modèles se téléchargeront au premier usage
     [switch]$SansSons,       # pas de bibliothèque Sonniss (≈ 2 Go)
     [switch]$SansRaccourci,
@@ -59,6 +60,7 @@ if (-not $SansCarte -and (Get-Command nvidia-smi -ErrorAction SilentlyContinue))
 }
 if ($Gpu) { Note "$Gpu, $Vram Go" } else { Note "pas de carte NVIDIA : tout tournera sur le processeur" }
 $Full = $Gpu -and $Vram -ge 5.5
+if ($Profil -eq "auto") { $Profil = if ($Full) { "complet" } else { "leger" } }
 if (-not $Profil) {
     Write-Host ""
     Write-Host "   1. Complet : voix IA qui jouent l'émotion, visages qui parlent, sons choisis en regardant les cases"

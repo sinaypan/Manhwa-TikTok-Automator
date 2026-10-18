@@ -66,3 +66,12 @@ def test_downloads_match_doctor_checks():
 def test_machine_is_read():
     info = doctor.machine()
     assert info["threads"] >= 1 and info["free"] >= 0 and info["cpu"]
+
+
+def test_one_line_install():
+    raw = (ROOT / "install" / "get.ps1").read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf")  # lu par « irm | iex » : un BOM deviendrait un caractère parasite
+    text = raw.decode("utf-8")
+    assert "raw.githubusercontent.com/sinaypan/Manhwa-TikTok-Automator/main/install/get.ps1" in text
+    assert "install\install.ps1" in text and '"-Profil", "auto"' in text
+    assert '"auto"' in (ROOT / "install" / "install.ps1").read_text(encoding="utf-8-sig")
