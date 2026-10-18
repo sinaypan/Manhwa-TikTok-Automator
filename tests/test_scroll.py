@@ -37,3 +37,18 @@ def test_scroll_clip_keeps_the_video_size():
     clip = scroll.scroll_clip(strip, panels(), 400, 600, 8.0, fit=True)
     for t in (0.0, 2.3, 5.0, 7.9):
         assert clip.get_frame(t).shape == (600, 400, 3)
+
+
+def test_enter_rules_cut_on_hits_and_fade_between_places():
+    fxs = [{}, {"shake": 30}, {}, {"shake": 9}, {}]
+    places = [{"from": 1}, {"from": 1}, {"from": 3}, {"from": 3}, None]
+    assert scroll.enter_rules(fxs, places) == ["glide", "cut", "fade", "glide", "glide"]
+
+
+def test_cut_arrives_at_once():
+    a, b = panels()
+    b.enter = "cut"
+    keys = scroll.camera_keys([a, b], 400, 600, 3000)
+    cam = scroll.camera_path(keys)
+    first_b = next(k for k in keys if k[0] == b.start)
+    assert abs(cam(b.start + 0.01)[1] - first_b[1][1]) < 1e-6  # déjà là, sans glisser

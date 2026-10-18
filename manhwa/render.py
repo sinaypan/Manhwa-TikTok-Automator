@@ -76,21 +76,84 @@ def render_key(chapter, data, cfg):
     return fingerprint(parts, cfg["render"], cfg["output"], music and os.path.getsize(music), mood, talking)
 
 
-def _loudness(video, target):
-    """Tout le son au niveau des vidéos en ligne (≈ -14 LUFS, comme TikTok) : l'image est recopiée telle quelle."""
+def write_video(clip, path, fps, threads=1, audio_tmp=None, progress=None, loudness=None):
+    """Écrit la vidéo : plusieurs images calculées en même temps (threads), envoyées dans l'ordre à ffmpeg.
+
+    moviepy calcule les images une à une sur un seul cœur ; ici les calculs (OpenCV, numpy) de
+    plusieurs images avancent ensemble. Pendant ce temps, le son s'écrit à part et prend son
+    niveau final (loudness, LUFS) ; il est joint à la fin sans rien réencoder.
+    """
     import subprocess
+    import threading
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
 
+    import cv2
     import imageio_ffmpeg
+    import numpy as np
 
-    out = str(video) + ".loud.mp4"
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    sound, failed = {}, []
+
+    def write_sound():  # en même temps que les images
+        try:
+            raw = str(audio_tmp) + ".raw.m4a"
+            clip.audio.write_audiofile(raw, fps=44100, codec="aac", logger=None)
+            if loudness:
+                try:
+                    subprocess.run([ffmpeg, "-v", "quiet", "-y", "-i", raw, "-af", f"loudnorm=I={loudness}:TP=-1.5:LRA=11",
+                                    "-ar", "44100", "-c:a", "aac", "-b:a", "192k", str(audio_tmp)], check=True)
+                    os.remove(raw)
+                except Exception as e:  # le son d'avant reste
+                    print(f"  [!] Niveau sonore non réglé ({e})")
+                    os.replace(raw, audio_tmp)
+            else:
+                os.replace(raw, audio_tmp)
+            sound["path"] = str(audio_tmp)
+        except Exception as e:
+            failed.append(e)
+
+    worker = None
+    if clip.audio is not None and audio_tmp:
+        worker = threading.Thread(target=write_sound, daemon=True)
+        worker.start()
+    n = max(1, int(clip.duration * fps + 1e-6))
+    w, h = clip.size
+    silent = str(path) + ".video.mp4"
+    out = imageio_ffmpeg.write_frames(silent, (w, h), fps=fps, codec="libx264", quality=None, macro_block_size=1,
+                                      ffmpeg_log_level="error", output_params=["-preset", "ultrafast", "-crf", "23"])
+    out.send(None)
+    shot = lambda k: np.ascontiguousarray(clip.get_frame(k / fps), dtype=np.uint8)
+    cv_threads = cv2.getNumThreads()
+    if threads > 1:  # chaque image sur un cœur : mesuré 127 images/s à 8 contre 70 avec OpenCV seul sur 12 cœurs
+        cv2.setNumThreads(1)
     try:
-        subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-v", "quiet", "-y", "-i", str(video), "-c:v", "copy",
-                        "-af", f"loudnorm=I={target}:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k", out], check=True)
-        os.replace(out, video)
-    except Exception as e:  # le son d'avant reste
-        print(f"  [!] Niveau sonore non réglé ({e})")
-        if os.path.exists(out):
-            os.remove(out)
+        with ThreadPoolExecutor(max_workers=threads) as pool:
+            ahead = deque()
+            for k in range(n):
+                ahead.append(pool.submit(shot, k))
+                if len(ahead) >= 2 * threads:
+                    out.send(ahead.popleft().result())
+                    if progress and k % 24 == 0:
+                        progress(k - len(ahead), n)
+            while ahead:
+                out.send(ahead.popleft().result())
+    finally:
+        cv2.setNumThreads(cv_threads)
+        out.close()
+    if worker:
+        worker.join()
+        if failed:
+            raise failed[0]
+    if sound:
+        subprocess.run([ffmpeg, "-v", "error", "-y", "-i", silent, "-i", sound["path"], "-map", "0:v", "-map", "1:a",
+                        "-c", "copy", "-shortest", str(path)], check=True)
+        os.remove(silent)
+        os.remove(sound["path"])
+    else:
+        os.replace(silent, path)
+    if progress:
+        progress(n, n)
 
 
 def _load_audio(path):
@@ -118,20 +181,6 @@ def _silence(duration, like):
         return out if hasattr(t, "__len__") else out[0]
 
     return AudioClip(frame, duration=duration, fps=like.fps)
-
-
-def _progress_logger(progress):
-    """Logger moviepy qui remonte (images écrites, total d'images de la vidéo)."""
-    import proglog
-
-    class Logger(proglog.ProgressBarLogger):
-        def bars_callback(self, bar, attr, value, old_value=None):
-            if bar == "frame_index" and attr == "index":
-                total = self.bars[bar].get("total") or 0
-                if total:
-                    progress(min(value, total), total)
-
-    return Logger()
 
 
 # ---------- Mouvement ----------
@@ -212,7 +261,7 @@ def timeline(clips, durations, kind="slide", seconds=0.3):
     return VideoClip(frame, duration=total), starts
 
 
-def _scroll(chapter, strip, reading, durations, out_w, out_h, r, face_parts, faces_of):
+def _scroll(chapter, strip, reading, durations, out_w, out_h, r, face_parts, faces_of, places=None):
     """La planche entière qui défile de case en case (scroll.py), avec le relief et les visages qui parlent."""
     import cv2
 
@@ -243,6 +292,9 @@ def _scroll(chapter, strip, reading, durations, out_w, out_h, r, face_parts, fac
         panels.append(p)
         starts.append(t)
         t += d
+    if r.get("smart_transitions", True):  # coupe nette sur un coup, fondu vers un autre lieu
+        for p, how in zip(panels, scroll.enter_rules([p.fx for p in panels], places or [None] * len(panels))):
+            p.enter = how
     return scroll.scroll_clip(big, panels, out_w, out_h, t, fit=bool(r.get("scroll_fit", True))), starts
 
 
@@ -487,7 +539,9 @@ def run_render(chapter, cfg, force=False, progress=None):
     print(f"  Rendu de {len(clips)} frames ({sum(durations) / 60:.1f} min)...")
     try:
         if scrolling:
-            final, starts = _scroll(chapter, strip, reading, durations, out_w, out_h, r, talking and face_parts, talking and faces_of)
+            kept = {f for f in files}
+            final, starts = _scroll(chapter, strip, reading, durations, out_w, out_h, r, talking and face_parts, talking and faces_of,
+                                    [w for w, f in zip(where, data["frames"]) if f["file"] in kept])
         else:
             final, starts = timeline(clips, durations, r.get("transition", "slide"), float(r.get("transition_seconds", 0.3)))
         path = music_file(cfg)
@@ -522,9 +576,9 @@ def run_render(chapter, cfg, force=False, progress=None):
         if layers:
             final = final.with_audio(CompositeAudioClip(layers).with_duration(final.duration))
         # le son temporaire dans le dossier du chapitre : deux rendus en même temps ne se gênent pas
-        final.write_videofile(str(tmp), fps=r["fps"], codec="libx264", audio_codec="aac",
-                              temp_audiofile=str(chapter.root / "video.part.audio.m4a"), preset="ultrafast", threads=4,
-                              logger=_progress_logger(progress) if progress else "bar")
+        threads = int(r.get("threads", 0)) or max(1, min(8, (os.cpu_count() or 2) - 2))
+        write_video(final, tmp, r["fps"], threads, chapter.root / "video.part.audio.m4a", progress,
+                    loudness=float(r["loudness"]) if r.get("loudness") else None)
         final.close()
     finally:
         for c in clips + opened:
@@ -532,8 +586,6 @@ def run_render(chapter, cfg, force=False, progress=None):
                 c.close()
             except Exception:
                 pass
-    if r.get("loudness"):
-        _loudness(tmp, float(r["loudness"]))
     os.replace(tmp, chapter.video_path)
 
     data = chapter.load()  # relu : on a pu valider des choses dans le Studio pendant le rendu

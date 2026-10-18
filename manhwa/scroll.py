@@ -6,6 +6,8 @@ La planche entière, en pleine largeur, défile de case en case ([render] layout
     relief   dans la case lue, le premier plan avance puis revient (0 au début et à la fin de la
              case, 0 vers ses bords) : les gouttières restent droites, le défilement reste lisse
     reste    visages qui parlent, tremblement et flash des coups : sur la case lue, comme avant
+    passages on glisse vers la case suivante ; sur un coup, on y arrive d'un coup sec (le
+             tremblement suit) ; vers un autre lieu, un court fondu (enter_rules)
     zoom     [render] scroll_fit : la caméra zoome pour que la case lue remplisse la largeur de
              l'écran (aussi grande qu'une case par image), et ajuste le zoom en glissant
 
@@ -14,6 +16,7 @@ cases sont ceux de l'auteur. Les cases restent l'unité de travail (voix, sons, 
 """
 import bisect
 import math
+import threading
 
 import numpy as np
 
@@ -22,6 +25,8 @@ HOLD_EDGE = 0.12  # une case haute sans bulle : un temps d'arrêt en haut et en 
 RELIEF = 0.035    # le premier plan grossit de 3,5 % au plus fort de la case
 DRIFT = 0.02      # et glisse de 2 % de la largeur
 MAX_ZOOM = 2.0    # avec fit : une case étroite n'est pas agrandie plus de 2 fois
+FADE = 0.4        # s : fondu vers un autre lieu
+CUT_SHAKE = 24    # un coup au moins normal (motion.effects : 24 px de tremblement) : on y arrive d'un coup
 MIN_RELIEF_H = 240  # px : une bande de texte basse n'a pas de relief (il pousserait ses lettres dehors)
 FIT_MARGIN = 0.04  # et une petite marge de chaque côté : un texte qui dépasse de la case reste entier
 
@@ -43,6 +48,7 @@ class Panel:
         self.anim = anim        # anim(t) : l'image de la case à l'instant t (visages qui parlent)
         self.depth = depth      # relief au quart de la taille de la case (motion.depth_map), ou None
         self.span = (self.x, self.x + self.w)  # ce qui doit tenir en largeur (la case et ses bulles)
+        self.enter = "glide"    # comment on y arrive : "glide" (on glisse), "cut" (d'un coup), "fade" (fondu)
 
 
 def camera_keys(panels, out_w, out_h, total_h, fit=False):
@@ -57,12 +63,13 @@ def camera_keys(panels, out_w, out_h, total_h, fit=False):
         view_h = out_h / z
         cx = (x0 + x1) / 2 if fit else out_w / 2
         at = lambda c: (cx, min(total_h - view_h / 2, max(view_h / 2, c)), z)
+        arrive = GLIDE if p.enter == "glide" else 1e-3  # coupe nette ou fondu : la caméra y est d'un coup
         if p.h <= view_h:
-            keys.append((p.start, at(p.y + p.h / 2), GLIDE))
+            keys.append((p.start, at(p.y + p.h / 2), arrive))
             continue
         first, last = p.y + view_h / 2, p.y + p.h - view_h / 2  # case haute : de son haut à son bas
-        keys.append((p.start, at(first), GLIDE))
-        inside = sorted((max(p.start + GLIDE, p.start + t - 0.3), at(min(last, max(first, c)))) for t, c in p.bubbles)
+        keys.append((p.start, at(first), arrive))
+        inside = sorted((max(p.start + arrive, p.start + t - 0.3), at(min(last, max(first, c)))) for t, c in p.bubbles)
         if inside:  # elle va voir la bulle de chaque réplique
             for k, (when, view) in enumerate(inside):
                 nxt = inside[k + 1][0] if k + 1 < len(inside) else p.start + p.duration
@@ -119,9 +126,14 @@ def _relief_maps(panel, local, side, rows):
     map_y = (cy + dy / s).astype(np.float32)
     # agrandies seulement pour les lignes visibles (lues dans la grille au quart, en douceur)
     r0, r1 = rows
-    qy = ((np.arange(r0, r1, dtype=np.float32) + 0.5) * fy - 0.5)[:, None]
-    gx = np.ascontiguousarray(np.broadcast_to(qx, (r1 - r0, panel.w)))
-    gy = np.ascontiguousarray(np.broadcast_to(qy, (r1 - r0, panel.w)))
+    grids = panel.__dict__.setdefault("_rows", {})
+    if (r0, r1) not in grids:
+        if len(grids) > 8:
+            grids.clear()
+        qy = ((np.arange(r0, r1, dtype=np.float32) + 0.5) * fy - 0.5)[:, None]
+        grids[(r0, r1)] = (np.ascontiguousarray(np.broadcast_to(qx, (r1 - r0, panel.w))),
+                           np.ascontiguousarray(np.broadcast_to(qy, (r1 - r0, panel.w))))
+    gx, gy = grids[(r0, r1)]
     mx = cv2.remap(map_x, gx, gy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     my = cv2.remap(map_y, gx, gy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     return mx, my
@@ -145,8 +157,27 @@ def scroll_clip(strip_rgb, panels, out_w, out_h, total, fit=False):
     camera = camera_path(camera_keys(panels, out_w, out_h, H, fit))
     starts = [p.start for p in panels]
 
+    before = {}  # la dernière image de la case d'avant (pour un fondu)
+    lock = threading.Lock()
+
     def frame(t):
         t = float(t)
+        img = view(t)
+        i = max(0, bisect.bisect_right(starts, t) - 1)
+        cur = panels[i]
+        local = t - cur.start
+        if cur.enter == "fade" and i and local < FADE:  # un autre lieu : fondu depuis la dernière image d'avant
+            with lock:
+                if i not in before:
+                    if len(before) > 2:
+                        before.clear()
+                    before[i] = view(cur.start - 1e-3).astype(np.float32)
+                last = before[i]
+            a = _ease(local / FADE)
+            img = (last * (1 - a) + img.astype(np.float32) * a).astype(np.uint8)
+        return img
+
+    def view(t):
         cx, cy, z = camera(t)
         vw, vh = min(out_w, round(out_w / z)), min(H, round(out_h / z))  # ce que voit la caméra, dans la planche
         left = int(min(max(0, round(cx - vw / 2)), out_w - vw))
@@ -182,3 +213,19 @@ def scroll_clip(strip_rgb, panels, out_w, out_h, total, fit=False):
         return img
 
     return VideoClip(frame, duration=total)
+
+
+def enter_rules(fxs, places):
+    """Comment arriver sur chaque case : "cut" sur un coup, "fade" vers un autre lieu, sinon "glide".
+
+    fxs : les effets de chaque case (motion.effects) ; places : le lieu de chaque case (places.frame_places).
+    """
+    out = []
+    for i, (fx, place) in enumerate(zip(fxs, places)):
+        if i and (fx or {}).get("shake", 0) >= CUT_SHAKE:
+            out.append("cut")
+        elif i and place and places[i - 1] and place.get("from") != places[i - 1].get("from"):
+            out.append("fade")
+        else:
+            out.append("glide")
+    return out

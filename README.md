@@ -294,7 +294,9 @@ coups : zoom « punch », tremblement, flash ; pendant chaque case, la caméra g
 vidéo glisse de case en case au lieu de montrer une case par image ; la caméra zoome pour que la
 case lue remplisse la largeur (`scroll_fit`), s'arrête dessus le temps des répliques, et sur une
 case plus haute que l'écran va voir la bulle de chaque réplique. Rien n'est coupé : les blancs
-(ou noirs) entre les cases sont ceux de l'auteur. `layout = "cases"` revient à une case par image.
+(ou noirs) entre les cases sont ceux de l'auteur. Sur un coup, la caméra arrive d'un coup sec
+(le tremblement suit) ; vers un autre lieu, un court fondu (`smart_transitions`).
+`layout = "cases"` revient à une case par image.
 
 La **musique suit l'ambiance** : calme, tension, combat ou tristesse, d'après ce que
 montrent les cases et le ton des répliques. Elle change avec la scène, en fondu, et
@@ -324,7 +326,7 @@ Mesuré sur un épisode neuf de 142 cases et 144 répliques (RTX 3050 6 Go), ave
 | Relecture, voix, sons, lieux (GPT ou Claude) | quelques secondes chacune |
 | Visages qui parlent (22 visages, 4 dessins chacun) | ≈ 10 à 14 min |
 | Voix (Qwen3-TTS, puis le timbre de chaque personnage, réécoute comprise) | ≈ 12 à 15 min |
-| Rendu de la vidéo (8 min) | ≈ 3,5 min |
+| Rendu de la vidéo (9 min ; 8 images calculées en même temps) | ≈ 3,5 min |
 | Réécoute et découpe en parties | ≈ 1 min |
 
 Chaque étape garde ce qu'elle a fait : relancée, elle ne refait que ce qui a changé (une

@@ -12,6 +12,7 @@ groupe), captions_font (vide = une police grasse de Windows), captions_size.
 import bisect
 import os
 import re
+import threading
 
 import numpy as np
 
@@ -123,13 +124,19 @@ def burn(clip, evts, cfg, y):
     width = clip.size[0]
     starts = [e[0] for e in evts]
     cache = {}
+    lock = threading.Lock()  # plusieurs images peuvent se calculer en même temps (render.write_video)
 
     def caption(t):
         i = bisect.bisect_right(starts, t) - 1
         if i < 0 or t >= evts[i][1]:
             return None
+        with lock:
+            return _cached(i)
+
+    def _cached(i):
         if i not in cache:
-            cache.clear()
+            if len(cache) > 4:
+                cache.clear()
             img = draw(evts[i][2], evts[i][3], width, font_file, size)
             ys, xs = np.nonzero(img[:, :, 3])  # seulement le rectangle du texte : le reste de la bande est vide
             if not len(xs):
