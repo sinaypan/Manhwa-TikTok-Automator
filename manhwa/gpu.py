@@ -39,3 +39,17 @@ def onnx_providers():
     enable_cuda_dlls()
     available = ort.get_available_providers()
     return [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in available]
+
+
+def before_paddle():
+    """À appeler avant d'importer Paddle : charge d'abord CTranslate2 (Whisper).
+
+    Paddle chargé en premier dans le programme, CTranslate2 ne se charge plus ensuite (WinError 127,
+    une DLL CUDA déjà prise dans une autre version) : « Tout faire » s'arrêtait aux voix, quand
+    Whisper réécoute les répliques. Dans cet ordre-ci, les deux marchent.
+    """
+    enable_cuda_dlls()
+    try:
+        import ctranslate2  # noqa: F401
+    except Exception:
+        pass

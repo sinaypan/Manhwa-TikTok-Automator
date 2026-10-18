@@ -4,7 +4,7 @@ CLIP (scene.py) reconnaît des choses (du feu, une lame) mais pas l'action. Ici 
 voit décrit chaque case en une ou deux phrases, puis GPT (sfx.suggest_sounds) lit ces
 descriptions dans l'ordre de l'histoire, avec les répliques autour, et choisit les sons.
 
-    vision = "local"   Qwen3.5-2B (Apache 2.0), dans .venv-tts : ≈ 4 s par case, 4,6 Go de carte
+    vision = "local"   Qwen3.5-2B (Apache 2.0), dans .venv-tts : ≈ 2 s par case (6 à la fois), ≈ 5 Go de carte
                        graphique, sans clé (le modèle, ≈ 4,6 Go, se télécharge une fois)
     vision = "gpt"     GPT-4.1 regarde l'image (plus juste sur quelques essais, mais chaque case part au proxy)
 
@@ -34,6 +34,7 @@ PROMPT = ("This is one panel of a manhwa (Korean webtoon). In one or two short s
           "who does what, any impact, weapon, blood, fall, fire, door, footsteps, magic. Then on a new line write "
           "'SOUNDS:' followed by up to 3 sound effects you would hear, most important first, or 'none' if it is a calm "
           "talking scene.")
+BATCH = 6  # cases décrites ensemble : 1,9 s par case au lieu de 5,3 (8 : 1,7 s, mais 5,5 Go de carte)
 _WORKER = {}
 _LOCK = threading.Lock()
 
@@ -75,17 +76,18 @@ def close():
             p.kill()
 
 
-def _local(path):
+def _local_many(paths):
+    """Plusieurs cases d'un coup : le modèle écrit pour toutes en même temps (BATCH cases ≈ le temps d'une)."""
     from manhwa.chatterbox_tts import _answer
 
     with _LOCK:
         p = _worker()
-        p.stdin.write(json.dumps({"image": str(path), "prompt": PROMPT}) + "\n")
+        p.stdin.write(json.dumps({"batch": [{"image": str(x), "prompt": PROMPT} for x in paths]}) + "\n")
         p.stdin.flush()
         answer = _answer(p)
     if "error" in answer:
         raise RuntimeError(answer["error"])
-    return answer["text"]
+    return answer["texts"]
 
 
 def _gpt(path):
@@ -132,21 +134,28 @@ def run_describe(chapter, cfg, progress=None):
     todo = [f for f in data["frames"] if (got.get(f["file"]) or {}).get("key") == _frame_key(f) and "desc" not in got[f["file"]]]
     if not todo:
         return 0
-    look = _local if backend(cfg) == "local" else _gpt
+    local = backend(cfg) == "local"
+    size = BATCH if local else 1
     strip, _ = load_strip(chapter.pages(), cfg["slicer"]["max_src_width"])
     path = scene_path(chapter)
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            for i, frame in enumerate(todo):
-                x, y, w, h = frame["crop"]
-                img = os.path.join(tmp, "case.jpg")
-                cv2.imwrite(img, strip[y:y + h, x:x + w], [cv2.IMWRITE_JPEG_QUALITY, 90])
-                action, heard = parse(look(img))
-                got[frame["file"]]["desc"] = action
-                got[frame["file"]]["heard"] = heard
+            for start in range(0, len(todo), size):
+                group = todo[start:start + size]
+                imgs = []
+                for k, frame in enumerate(group):
+                    x, y, w, h = frame["crop"]
+                    imgs.append(os.path.join(tmp, f"case{k}.jpg"))
+                    cv2.imwrite(imgs[-1], strip[y:y + h, x:x + w], [cv2.IMWRITE_JPEG_QUALITY, 90])
+                texts = _local_many(imgs) if local else [_gpt(imgs[0])]
+                for frame, text in zip(group, texts):
+                    action, heard = parse(text)
+                    got[frame["file"]]["desc"] = action
+                    got[frame["file"]]["heard"] = heard
+                done = start + len(group)
                 if progress:
-                    progress(i + 1, len(todo))
-                if i % 10 == 9 or i == len(todo) - 1:  # gardé en route : une coupure ne fait pas tout refaire
+                    progress(done, len(todo))
+                if done % 12 < size or done == len(todo):  # gardé en route : une coupure ne fait pas tout refaire
                     path.write_text(json.dumps(got, ensure_ascii=False), encoding="utf-8")
     finally:
         close()

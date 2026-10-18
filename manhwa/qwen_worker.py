@@ -4,6 +4,8 @@
 Une demande JSON par ligne sur l'entrée standard, une réponse par ligne :
     {"text", "instruct" (la voix décrite, et l'émotion), "out" (.wav), "seed"} → {"ok"} | {"error"}
     {"batch": [{"text", "instruct", "out"}, …], "seed"} → {"ok"} : plusieurs à la fois (≈ 2 fois plus vite à 4)
+    "max_tokens" : la limite de longueur (12 par seconde de voix) ; sans elle, une réplique qui déraille
+    parle jusqu'à 11 minutes et tout le paquet l'attend
 Il s'arrête quand l'entrée se ferme : la carte graphique est libérée.
 N'importe rien de manhwa : il tourne dans un autre environnement Python.
 """
@@ -35,8 +37,9 @@ def main():
             job = json.loads(line)
             torch.manual_seed(int(job.get("seed", 0)))
             batch = job.get("batch") or [job]
+            extra = {"max_new_tokens": int(job["max_tokens"])} if job.get("max_tokens") else {}
             wavs, sr = model.generate_voice_design(text=[b["text"] for b in batch], language=["English"] * len(batch),
-                                                   instruct=[b["instruct"] for b in batch])
+                                                   instruct=[b["instruct"] for b in batch], **extra)
             for b, wav in zip(batch, wavs):
                 tmp = b["out"] + ".part.wav"
                 sf.write(tmp, wav, sr)

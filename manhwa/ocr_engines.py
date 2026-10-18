@@ -115,6 +115,9 @@ def paddle_device(cfg=None):
     if wanted == "cpu":
         return "cpu"
     try:
+        from manhwa.gpu import before_paddle
+
+        before_paddle()
         import paddle
 
         if paddle.device.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0:
@@ -127,6 +130,9 @@ def paddle_device(cfg=None):
 def _paddle(cfg=None):
     if "paddle" not in _cache:
         os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+        from manhwa.gpu import before_paddle
+
+        before_paddle()
         from paddleocr import PaddleOCR
 
         device = paddle_device(cfg)

@@ -269,6 +269,18 @@ def _wrong(chapter, data, segs):
     return out
 
 
+CODEC_HZ = 12  # Qwen3-TTS-12Hz : 12 éléments par seconde de voix
+
+
+def max_tokens(segs):
+    """La plus longue voix permise pour un paquet : 6 caractères par seconde au plus lent, + 3 s.
+
+    Sans limite (8 192, ≈ 11 min), une réplique qui déraille fait attendre tout le paquet ; coupée
+    trop tôt, la réécoute (Whisper) la trouve fausse et la refait.
+    """
+    return int(CODEC_HZ * (3 + max(len(s["text"]) for s in segs) / 6))
+
+
 def render_lines(chapter, data, segs, progress=None, tries=2):
     """Fait dire les répliques (segments prévus par tts.plan, engine « qwen »)."""
     if not segs:
@@ -295,13 +307,13 @@ def _render_lines(chapter, data, segs, progress, tries):
                          "instruct": f"{s['design']}. {EMOTION.get(s.get('emotion') or 'neutral', '')}"} for s in group]
                 seed = zlib.crc32(f"{'|'.join(s['audio_key'] for s in group)}:{attempt}".encode())
                 try:
-                    _ask("qwen", {"batch": jobs, "seed": seed})
+                    _ask("qwen", {"batch": jobs, "seed": seed, "max_tokens": max_tokens(group)})
                     raws.update({s["audio_key"]: j["out"] for s, j in zip(group, jobs)})
                 except Exception as e:  # le paquet raté : une à une
                     print(f"  [!] Qwen ({e}) : réplique par réplique")
                     for s, j in zip(group, jobs):
                         try:
-                            _ask("qwen", {**j, "seed": seed})
+                            _ask("qwen", {**j, "seed": seed, "max_tokens": max_tokens([s])})
                             raws[s["audio_key"]] = j["out"]
                         except Exception as e2:
                             print(f"  [!] Qwen : {e2} : {s['text'][:40]}")
