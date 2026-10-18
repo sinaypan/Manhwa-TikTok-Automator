@@ -396,7 +396,16 @@ def _scroll(chapter, strip, reading, durations, out_w, out_h, r, face_parts, fac
     if r.get("smart_transitions", True):  # coupe nette sur un coup, fondu vers un autre lieu
         for p, how in zip(panels, scroll.enter_rules([p.fx for p in panels], places or [None] * len(panels))):
             p.enter = how
-    return scroll.scroll_clip(big, panels, out_w, out_h, t, fit=bool(r.get("scroll_fit", True))), starts
+    fit = bool(r.get("scroll_fit", True))
+    if r.get("gpu_frames", True):  # les images calculées par la carte graphique (scroll_gpu.py), sinon le processeur
+        from manhwa import scroll_gpu
+
+        if scroll_gpu.available():
+            try:
+                return scroll_gpu.scroll_clip_gpu(big, panels, out_w, out_h, t, fit=fit), starts
+            except Exception as e:
+                print(f"  [!] Images par la carte graphique impossibles ({e}) : par le processeur")
+    return scroll.scroll_clip(big, panels, out_w, out_h, t, fit=fit), starts
 
 
 def _tall_image(strip, crop, out_w):

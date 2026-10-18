@@ -52,3 +52,34 @@ def test_cut_arrives_at_once():
     cam = scroll.camera_path(keys)
     first_b = next(k for k in keys if k[0] == b.start)
     assert abs(cam(b.start + 0.01)[1] - first_b[1][1]) < 1e-6  # déjà là, sans glisser
+
+
+def test_gpu_frames_match_the_processor():
+    import pytest
+
+    from manhwa import scroll_gpu
+
+    if not scroll_gpu.available():
+        pytest.skip("pas de carte graphique")
+    import cv2
+
+    strip = cv2.GaussianBlur((np.random.default_rng(0).random((3000, 400, 3)) * 255).astype(np.uint8), (0, 0), 3)
+    ps = panels()
+    ps[1].depth = cv2.GaussianBlur(np.random.default_rng(1).random((375, 50)).astype(np.float32), (0, 0), 8)
+    ps[1].fx = {"shake": 30, "punch": 0.08, "flash": 0.3}
+    ps[1].enter = "cut"
+    cpu = scroll.scroll_clip(strip, ps, 400, 600, 8.0, fit=True)
+    gpu = scroll_gpu.scroll_clip_gpu(strip, panels_with(ps), 400, 600, 8.0, fit=True)
+    for t in (0.5, 2.06, 2.3, 5.0, 7.9):
+        a, b = cpu.get_frame(t), gpu.get_frame(t)
+        assert b.shape == a.shape and cv2.PSNR(a, b) > 30, t
+
+
+def panels_with(ps):
+    # les mêmes cases, sans ce que le calcul du processeur a gardé en route
+    out = []
+    for p in ps:
+        q = scroll.Panel([0, 0, 1, 1], 1.0, p.start, p.duration)
+        q.__dict__.update({k: v for k, v in p.__dict__.items() if not k.startswith("_")})
+        out.append(q)
+    return out

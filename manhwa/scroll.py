@@ -100,10 +100,11 @@ def camera_path(keys):
     return camera
 
 
-def _relief_maps(panel, local, side, rows):
-    """Où prendre chaque pixel des lignes rows de la case, pour le relief à l'instant local (ou None)."""
-    import cv2
+def relief_quarter(panel, local, side):
+    """Le relief de la case à l'instant local, au quart de sa taille : (map_x, map_y), ou None.
 
+    map_x[q] : où prendre, dans la case, le pixel q de la grille au quart (le premier plan avance).
+    """
     e = math.sin(math.pi * min(1.0, max(0.0, local / max(panel.duration, 1e-3))))  # 0 → 1 → 0
     if e < 0.01 or panel.depth is None or panel.h < MIN_RELIEF_H:
         return None
@@ -119,11 +120,21 @@ def _relief_maps(panel, local, side, rows):
         dy = ((np.arange(qh, dtype=np.float32) + 0.5) * panel.h / qh - 0.5 - cy)[:, None]
         qx = ((np.arange(panel.w, dtype=np.float32) + 0.5) * qw / panel.w - 0.5)[None, :]
         panel._grid = (near, cx, cy, dx, dy, qx, qh / panel.h)
-    near, cx, cy, dx, dy, qx, fy = panel._grid
+    near, cx, cy, dx, dy, _, _ = panel._grid
     s = 1 + RELIEF * e * near
     shift = side * DRIFT * panel.w * e * near
-    map_x = (cx + (dx - shift) / s).astype(np.float32)
-    map_y = (cy + dy / s).astype(np.float32)
+    return (cx + (dx - shift) / s).astype(np.float32), (cy + dy / s).astype(np.float32)
+
+
+def _relief_maps(panel, local, side, rows):
+    """Où prendre chaque pixel des lignes rows de la case, pour le relief à l'instant local (ou None)."""
+    import cv2
+
+    quarter = relief_quarter(panel, local, side)
+    if quarter is None:
+        return None
+    map_x, map_y = quarter
+    _, _, _, _, _, qx, fy = panel._grid
     # agrandies seulement pour les lignes visibles (lues dans la grille au quart, en douceur)
     r0, r1 = rows
     grids = panel.__dict__.setdefault("_rows", {})
