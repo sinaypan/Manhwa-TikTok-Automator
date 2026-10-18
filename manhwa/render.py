@@ -57,7 +57,9 @@ def render_key(chapter, data, cfg):
                       [[os.path.basename(s), g] for s, g in sounds.get(frame["file"], [])],
                       effects(hits.get(frame["file"], []))])
     from manhwa.places import load_places
+    from manhwa.watermark import is_ad, key as watermark_key
 
+    parts.append([watermark_key(chapter), cfg.get("watermark"), [f["file"] for f in data["frames"] if is_ad(f)]])
     music = music_file(cfg)
     if cfg["render"].get("ambience", True) or cfg["render"].get("voice_space", True):
         parts.append([[s.get("from"), s.get("space"), s.get("ambience")] for s in load_places(chapter).get("scenes") or []])
@@ -519,6 +521,9 @@ def run_render(chapter, cfg, force=False, progress=None):
     strip = None
     if scrolling or (pan and any(f["crop"][3] / max(1, f["crop"][2]) > TALL for f in data["frames"])):
         strip, _ = load_strip(chapter.pages(), cfg["slicer"]["max_src_width"])
+        from manhwa.watermark import clean
+
+        strip = clean(chapter, strip, cfg)  # sans les filigranes du site
     reading = []  # défilement : ce qu'il faut savoir de chaque case
 
     from manhwa import places as places_mod
@@ -550,8 +555,13 @@ def run_render(chapter, cfg, force=False, progress=None):
     with ThreadPoolExecutor(max_workers=8) as pool:
         ready = dict(zip(wanted, pool.map(lambda load: load(), wanted.values())))
 
+    from manhwa.watermark import is_ad
+
+    skip_ads = cfg.get("watermark", {}).get("skip_ads", True)
     clips, audios, opened, durations, voiced, files, spoken = [], [], [], [], [], [], []
     for i, frame in enumerate(data["frames"]):
+        if skip_ads and is_ad(frame) and not frame.get("segments"):  # la pub du site (« READ AT … ») : pas montrée
+            continue
         img_path = chapter.frames_dir / frame["file"]
         image = None if scrolling else read_image(img_path)  # en défilement, la planche sert, pas la frame
         if (not img_path.is_file()) if scrolling else image is None:

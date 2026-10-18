@@ -58,7 +58,7 @@ def before_paddle():
 # les petits modèles chargés dans le programme du Studio (lecture du texte, visages, relief, CLIP…)
 KEPT = (("manhwa.ocr_engines", "_cache"), ("manhwa.motion", "_DEPTH"), ("manhwa.faces", "_MODELS"),
         ("manhwa.scene", "_MODELS"), ("manhwa.sound_memory", "_S"), ("manhwa.listen", "_MODEL"),
-        ("manhwa.kokoro_tts", "_ENGINE"))
+        ("manhwa.kokoro_tts", "_ENGINE"), ("manhwa.watermark", "_SESSION"))
 
 
 def release_models():

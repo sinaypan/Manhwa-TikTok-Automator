@@ -36,7 +36,7 @@ MODELS = {
 # (nom, secondes sur la machine de test, ce qui la ralentit, ce qu'il faut, et sinon : (à la place, secondes, sorte))
 # sorte : "cpu" processeur, "gpu" carte graphique, "mix" les deux à moitié, "net" en ligne (GPT, Claude)
 STEPS = [
-    ("Frames, lecture du texte, visages", 64, "mix", "gpu",
+    ("Frames, lecture du texte, filigranes effacés, visages", 100, "mix", "gpu",
      ("lecture du texte par le processeur", 300, "cpu")),
     ("Ce qui se passe dans les cases (Qwen3.5-2B)", 277, "gpu", "tts",
      ("décrit par GPT", 20, "net")),

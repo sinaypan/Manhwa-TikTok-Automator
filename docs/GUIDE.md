@@ -249,6 +249,15 @@ Les étapes existent aussi séparément : `cut` (découpe auto), `slice` (à la 
 
 ## 4. Lecture du texte et bancs de mesure
 
+**Filigranes du site** (`[watermark]` dans config.toml) : juste après la lecture du texte, les filigranes que l'OCR a
+reconnus (« ASURASCANS.COM ») servent de modèle. Calés les uns sur les autres, ils donnent la forme entière du filigrane
+(bandeau, logo, texte), qui est ensuite cherchée dans toute la planche : sur l'épisode 1, 17 filigranes, dont 2 que la
+lecture avait ratés. LaMa (version entraînée sur des mangas) repeint chaque zone d'après ce qui l'entoure, en 0,2 s.
+Les pages d'origine ne sont pas touchées : les morceaux repeints sont rangés dans `.studio/watermarks/` et recollés sur
+la planche au moment des frames et du rendu. Le modèle appris est gardé pour la série, si bien qu'un épisode où l'OCR
+n'en lit presque aucun est quand même nettoyé. Les pages de pub du site (« READ AT … FOR THE FASTEST RELEASES ») ne
+sont pas montrées dans la vidéo (`skip_ads`).
+
 Le texte est lu par **PaddleOCR** (local, gratuit), puis regroupé en bulles dans l'ordre de
 lecture. Les onomatopées (coréennes ou anglaises), les filigranes du site, les crédits et
 les titres de chapitre sont repérés et **ne sont pas lus** par la voix ; les SFX sont gardés

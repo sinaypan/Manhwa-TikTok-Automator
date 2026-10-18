@@ -24,6 +24,10 @@ tesseract_cmd = ""        # vide = cherche tesseract dans le PATH puis à l'empl
 lang = "eng"
 psm = 6
 
+[watermark]
+remove = true             # efface les filigranes du site (« ASURASCANS.COM » et son bandeau), repeints par LaMa (watermark.py)
+skip_ads = true           # ne montre pas les pages de pub du site (« READ AT … FOR THE FASTEST RELEASES »)
+
 [tts]
 voice = "en-US-ChristopherNeural"   # ex : "fr-FR-HenriNeural", "en-US-AriaNeural"
 rate = "+0%"                         # vitesse (+10% conseillé pour TikTok)

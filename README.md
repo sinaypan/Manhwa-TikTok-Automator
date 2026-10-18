@@ -20,6 +20,7 @@ Chaque modèle a une licence qui permet une chaîne monétisée (voir [Modèles 
 |---|---|---|
 | 1 | **Télécharge le chapitre** depuis le lien de la série. Une vérification anti-robot se passe à la main, une fois. | Playwright (Chromium) |
 | 2 | **Découpe la planche** en cases et repère les bulles. | Règles d'image, détecteur de bulles |
+| | **Efface les filigranes du site** (bandeau, logo, texte), même ceux que l'OCR n'a pas lus, et saute ses pages de pub. | LaMa (version manga) |
 | 3 | **Lit le texte**, recolle les mots, écarte filigranes et onomatopées, puis le fait relire. | PaddleOCR, correction locale, GPT |
 | 4 | **Reconnaît les personnages** d'une case à l'autre et d'un épisode à l'autre, avec leurs noms tirés du wiki. | Détecteurs deepghs, CCIP, wiki Fandom |
 | 5 | **Comprend chaque case** (« il est projeté contre un mur, du sang gicle »). | Qwen3.5-2B |
@@ -176,14 +177,14 @@ Un épisode neuf de 142 cases et 144 répliques, en profil complet avec « Tout 
 
 | Étape | Durée |
 |---|---|
-| Frames, lecture du texte, visages | ≈ 1 min |
+| Frames, lecture du texte, filigranes effacés, visages | ≈ 1,5 min |
 | Ce qui se passe dans les cases (Qwen3.5-2B, 6 cases à la fois) | ≈ 4,5 min |
 | Relecture, voix, sons, lieux (GPT ou Claude) | < 1 min |
 | Visages qui parlent (22 visages, 4 dessins chacun) | ≈ 14 min |
 | Voix (Qwen3-TTS, puis le timbre de chaque personnage, réécoute comprise) | ≈ 13,5 min |
 | Rendu de la vidéo (images calculées et encodées par la carte graphique) | ≈ 2,5 min |
 | Réécoute et découpe en parties | ≈ 1 min |
-| **Total** | **≈ 38 min** |
+| **Total** | **≈ 39 min** |
 
 Les modèles se téléchargent une fois, à l'installation. Chaque étape garde ce qu'elle a fait : relancée, elle ne refait que ce
 qui a changé, et une étape coupée en route reprend là où elle s'était arrêtée. Le Studio note la vraie durée de chaque étape
@@ -196,7 +197,7 @@ et processeur (± 30 %). Pour ta machine, `doctor` fait le même calcul à parti
 
 | Machine | Profil | Un épisode |
 |---|---|---|
-| RTX 3050 Laptop 6 Go (la machine de test) | Complet | **≈ 38 min** (mesuré) |
+| RTX 3050 Laptop 6 Go (la machine de test) | Complet | **≈ 39 min** (mesuré) |
 | RTX 3060 12 Go, RTX 4060 8 Go | Complet | ≈ 22 min |
 | RTX 4070 12 Go | Complet | ≈ 14 min |
 | RTX 4090 24 Go | Complet | ≈ 11 min |
@@ -259,6 +260,7 @@ mesures est dans [docs/PLAN_V3.md](docs/PLAN_V3.md).
 | CLAP (LAION) | écouter et ranger les sons | Apache 2.0 | 0,7 Go |
 | SigLIP 2 | les sons appris de tes choix | Apache 2.0 | 0,18 Go |
 | FLUX.2 [klein] 4B | visages qui parlent | Apache 2.0 | 14,9 Go |
+| LaMa, version manga (dreMaz, ONNX ogkalu) | effacer les filigranes du site | MIT / Apache 2.0 | 0,2 Go |
 | Sons Sonniss (GDC bundles) | bruitages et ambiances | libres de droits, usage commercial permis | 2,2 Go |
 | GPT-4.1 ou Claude (en ligne, facultatif) | relecture, voix, sons, lieux, titres | selon ton abonnement | — |
 

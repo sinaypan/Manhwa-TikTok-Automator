@@ -27,10 +27,10 @@ def wait(jobs, key, timeout=10):
 def test_auto_skips_optional_steps_that_fail(monkeypatch):
     jobs = Jobs(load_config())
     names = [n for n, _, _ in jobs._steps("auto", {})]
-    assert names == ["frames", "ocr", "textfix", "faces", "scene", "describe", "wiki", "review", "voices", "sounds", "memory",
-                     "places", "talk", "pilot", "tts", "render", "listen", "parts"]
-    assert [o for _, _, o in jobs._steps("auto", {})] == [False, False, False, False, True, True, True, True, True, True, True, True,
-                                                          True, True, False, False, True, True]
+    assert names == ["frames", "ocr", "watermark", "textfix", "faces", "scene", "describe", "wiki", "review", "voices", "sounds",
+                     "memory", "places", "talk", "pilot", "tts", "render", "listen", "parts"]
+    assert [o for _, _, o in jobs._steps("auto", {})] == [False, False, True, False, False, True, True, True, True, True, True, True,
+                                                          True, True, True, False, False, True, True]
     assert [n for n, _, _ in jobs._steps("understand", {})] == ["scene", "describe", "sounds", "memory", "places"]
     ran = []
 

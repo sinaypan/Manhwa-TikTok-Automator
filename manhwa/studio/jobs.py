@@ -17,12 +17,12 @@ STEP_LABELS = {"frames": "Frames", "ocr": "Lecture du texte", "tts": "Voix", "re
                "wiki_faces": "Visages du wiki", "review": "Relecture GPT", "voices": "Choix des voix",
                "sounds": "Choix des sons (GPT)", "scene": "Ce que montrent les cases",
                "describe": "Ce qui se passe dans les cases", "places": "Lieux et ambiances", "memory": "Sons appris de tes choix", "talk": "Visages qui parlent", "talk_redo": "Visage redessiné",
-               "textfix": "Correction du texte", "listen": "Réécoute de la voix", "pilot": "Pilote automatique", "parts": "Découpe en parties",
+               "textfix": "Correction du texte", "listen": "Réécoute de la voix", "pilot": "Pilote automatique", "parts": "Découpe en parties", "watermark": "Filigranes effacés",
                "download": "Téléchargement"}
 # ce que l'on compte à chaque étape (« 6 210 / 12 960 images »)
 STEP_UNITS = {"frames": "frames", "ocr": "frames lues", "tts": "voix", "render": "images", "faces": "frames", "wiki": "",
               "wiki_images": "images", "wiki_faces": "images", "review": "lots", "voices": "", "sounds": "",
-              "scene": "cases", "describe": "cases", "places": "", "memory": "cases", "talk": "dessins", "talk_redo": "dessins", "textfix": "", "listen": "répliques", "pilot": "", "parts": "parties", "download": ""}
+              "scene": "cases", "describe": "cases", "places": "", "memory": "cases", "talk": "dessins", "talk_redo": "dessins", "textfix": "", "listen": "répliques", "pilot": "", "parts": "parties", "watermark": "filigranes", "download": ""}
 IMPORT_ID = "import"  # l'import n'a pas encore de chapitre : il a sa propre ligne
 
 
@@ -78,6 +78,7 @@ class Jobs:
         from manhwa.sound_memory import run_memory
         from manhwa.talk import run_talk
         from manhwa.vision import run_describe
+        from manhwa.watermark import run_watermarks
         from manhwa.tts import run_tts
         from manhwa.voices import propose as propose_voices
 
@@ -85,6 +86,7 @@ class Jobs:
         one = {
             "frames": lambda c, p: build_frames(c, cfg, progress=p),
             "ocr": lambda c, p: run_ocr(c, cfg, progress=p),
+            "watermark": lambda c, p: run_watermarks(c, cfg, progress=p),
             "faces": lambda c, p: run_faces(c, cfg, progress=p),
             "wiki": lambda c, p: wiki.load_wiki(series_dir(c)) or wiki.fetch(series_dir(c)),
             "review": lambda c, p: run_review(c, cfg, progress=p),
@@ -106,8 +108,8 @@ class Jobs:
             "wiki_faces": lambda c, p: wiki.embed_wiki_faces(series_dir(c), progress=p),
         }
         plans = {
-            "make": ["frames", "ocr", "textfix", "tts", "render", "listen?"],
-            "auto": ["frames", "ocr", "textfix", "faces", "scene?", "describe?", "wiki?", "review?", "voices?", "sounds?",
+            "make": ["frames", "ocr", "watermark?", "textfix", "tts", "render", "listen?"],
+            "auto": ["frames", "ocr", "watermark?", "textfix", "faces", "scene?", "describe?", "wiki?", "review?", "voices?", "sounds?",
                      "memory?", "places?", "talk?", "pilot?", "tts", "render", "listen?", "parts?"],
             "understand": ["scene", "describe", "sounds", "memory?", "places?"],
             "wiki_images": ["wiki_images", "wiki_faces"],

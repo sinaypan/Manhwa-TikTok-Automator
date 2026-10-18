@@ -306,6 +306,9 @@ def build_frames(chapter, cfg, bg_mode=None, progress=None):
     if strip is None:
         return 0
     analysis = load_analysis(chapter, cfg, strip=strip)
+    from manhwa.watermark import clean
+
+    strip = clean(chapter, strip, cfg)  # les filigranes du site effacés (watermark.py), si c'est déjà fait
     data, _ = ensure_cuts(chapter, cfg, analysis=analysis)
     panels = panels_from_cuts([c["y"] for c in data["cut"]["cuts"]], analysis["std"])
     crops = frame_crops(strip, panels, analysis["std"])

@@ -18,6 +18,7 @@ DEFAULTS = {
     },
     "output": {"width": 1080, "height": 1920},
     "ocr": {"engine": "paddle", "device": "auto", "tesseract_cmd": "", "lang": "eng", "psm": 6},
+    "watermark": {"remove": True, "skip_ads": True},
     "tts": {
         "voice": "en-US-ChristopherNeural",
         "rate": "+0%",
