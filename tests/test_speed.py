@@ -42,3 +42,28 @@ def test_depth_is_kept_on_disk(tmp_path, monkeypatch):
     assert len(calls) == 1 and a.shape == (16, 9) and np.allclose(a, b)
     motion.cached_depth(tmp_path, img, [0, 0, 36, 64], [[1, 1, 5, 5]])  # autres bulles : refait
     assert len(calls) == 2
+
+
+def test_video_falls_back_to_the_processor_encoder(tmp_path, monkeypatch):
+    # NVENC qui « réussit » sans rien écrire de lisible : la vidéo est refaite avec libx264
+    from moviepy import ColorClip
+
+    from manhwa import render
+
+    used = []
+    real = render.write_frames
+
+    def frames(clip, path, fps, threads=1, first=0, last=None, progress=None, codec="libx264"):
+        used.append(codec)
+        if codec != "libx264":
+            open(path, "wb").write(b"rien")
+            return
+        return real(clip, path, fps, threads, first, last, progress, codec)
+
+    monkeypatch.setattr(render, "write_frames", frames)
+    monkeypatch.setattr(render, "_ENCODER", {})
+    clip = ColorClip((320, 320), color=(10, 20, 30), duration=1.0)
+    out = tmp_path / "v.mp4"
+    render.write_video(clip, out, 12, codec="h264_nvenc")
+    assert used == ["h264_nvenc", "libx264"] and render._readable(str(out))
+    assert render.encoder("libx264") == "libx264"

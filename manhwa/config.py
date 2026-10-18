@@ -27,7 +27,7 @@ DEFAULTS = {
     "render": {"speed": 1.0, "fps": 24, "padding_seconds": 0.2, "silent_frame_seconds": 2.0,
                "zoom": 0.04, "pan": True, "music": "", "music_volume": 0.16, "music_duck": 0.4,
                "transition": "slide", "transition_seconds": 0.3, "effects": True, "depth": True, "ambience": True, "ambience_volume": 0.13,
-               "voice_space": True, "loudness": -14, "natural_rhythm": True, "guide": True, "talk": True, "layout": "scroll", "scroll_fit": True, "smart_transitions": True,
+               "voice_space": True, "loudness": -14, "natural_rhythm": True, "guide": True, "talk": True, "layout": "scroll", "scroll_fit": True, "smart_transitions": True, "encoder": "auto",
                "music_moods": True, "captions": True, "captions_words": 4, "captions_font": "", "captions_size": 78},
     "auto": {"sounds": True, "review": True, "speakers": 0.0},
     "sounds": {"vision": "local"},

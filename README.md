@@ -326,7 +326,7 @@ Mesuré sur un épisode neuf de 142 cases et 144 répliques (RTX 3050 6 Go), ave
 | Relecture, voix, sons, lieux (GPT ou Claude) | quelques secondes chacune |
 | Visages qui parlent (22 visages, 4 dessins chacun) | ≈ 10 à 14 min |
 | Voix (Qwen3-TTS, puis le timbre de chaque personnage, réécoute comprise) | ≈ 12 à 15 min |
-| Rendu de la vidéo (9 min ; 8 images calculées en même temps) | ≈ 3,5 min |
+| Rendu de la vidéo (9 min ; 8 images en même temps, encodée par la carte graphique) | ≈ 3 min |
 | Réécoute et découpe en parties | ≈ 1 min |
 
 Chaque étape garde ce qu'elle a fait : relancée, elle ne refait que ce qui a changé (une

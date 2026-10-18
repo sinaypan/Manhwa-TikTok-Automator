@@ -57,6 +57,7 @@ talk = true               # visages qui parlent : la bouche bat à chaque syllab
 layout = "scroll"         # "scroll" : la planche défile de case en case (scroll.py) ; "cases" : une case par image
 scroll_fit = true         # en défilement, la case lue remplit la largeur de l'écran (zoom en glissant)
 smart_transitions = true  # en défilement : coupe nette sur un coup, fondu vers un autre lieu, sinon on glisse
+encoder = "auto"          # "auto" : la carte graphique encode (NVENC) si elle peut, sinon le processeur (libx264)
 captions = true           # sous-titres karaoké (le mot dit passe en jaune)
 captions_words = 4        # mots affichés ensemble
 captions_font = ""        # chemin d'une police .ttf ; vide = Impact (ou une autre police grasse de Windows)

@@ -17,6 +17,7 @@
 """
 import math
 import os
+from pathlib import Path
 
 from manhwa.config import ROOT
 from manhwa.panels import STUDIO_DIR
@@ -76,32 +77,28 @@ def render_key(chapter, data, cfg):
     return fingerprint(parts, cfg["render"], cfg["output"], music and os.path.getsize(music), mood, talking)
 
 
-def write_video(clip, path, fps, threads=1, audio_tmp=None, progress=None, loudness=None):
-    """Écrit la vidéo : plusieurs images calculées en même temps (threads), envoyées dans l'ordre à ffmpeg.
+# ---------- Écriture : images en parallèle, son à part, encodage par la carte graphique ----------
 
-    moviepy calcule les images une à une sur un seul cœur ; ici les calculs (OpenCV, numpy) de
-    plusieurs images avancent ensemble. Pendant ce temps, le son s'écrit à part et prend son
-    niveau final (loudness, LUFS) ; il est joint à la fin sans rien réencoder.
-    """
+def _ffmpeg():
+    import imageio_ffmpeg
+
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+def _start_sound(clip, audio_tmp, loudness=None):
+    """Écrit le son (et lui donne son niveau final, LUFS) pendant que les images se calculent."""
     import subprocess
     import threading
-    from collections import deque
-    from concurrent.futures import ThreadPoolExecutor
 
-    import cv2
-    import imageio_ffmpeg
-    import numpy as np
+    done = {}
 
-    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-    sound, failed = {}, []
-
-    def write_sound():  # en même temps que les images
+    def run():
         try:
             raw = str(audio_tmp) + ".raw.m4a"
             clip.audio.write_audiofile(raw, fps=44100, codec="aac", logger=None)
             if loudness:
                 try:
-                    subprocess.run([ffmpeg, "-v", "quiet", "-y", "-i", raw, "-af", f"loudnorm=I={loudness}:TP=-1.5:LRA=11",
+                    subprocess.run([_ffmpeg(), "-v", "quiet", "-y", "-i", raw, "-af", f"loudnorm=I={loudness}:TP=-1.5:LRA=11",
                                     "-ar", "44100", "-c:a", "aac", "-b:a", "192k", str(audio_tmp)], check=True)
                     os.remove(raw)
                 except Exception as e:  # le son d'avant reste
@@ -109,50 +106,154 @@ def write_video(clip, path, fps, threads=1, audio_tmp=None, progress=None, loudn
                     os.replace(raw, audio_tmp)
             else:
                 os.replace(raw, audio_tmp)
-            sound["path"] = str(audio_tmp)
+            done["path"] = str(audio_tmp)
         except Exception as e:
-            failed.append(e)
+            done["error"] = e
 
-    worker = None
-    if clip.audio is not None and audio_tmp:
-        worker = threading.Thread(target=write_sound, daemon=True)
-        worker.start()
-    n = max(1, int(clip.duration * fps + 1e-6))
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+
+    def wait():
+        worker.join()
+        if "error" in done:
+            raise done["error"]
+        return done["path"]
+
+    return wait
+
+
+ENCODERS = {  # mesuré sur l'épisode 1 (1080×1920) : même qualité (≈ 44 dB), fichiers un peu plus légers
+    "h264_nvenc": ["-preset", "p2", "-rc", "vbr", "-cq", "21", "-b:v", "0"],  # la carte graphique : 175 images/s
+    "libx264": ["-preset", "ultrafast", "-crf", "23"],                         # le processeur : 227 images/s
+}
+_ENCODER = {}
+
+
+def encoder(wanted="auto"):
+    """L'encodeur vidéo : NVENC (la carte graphique encode, le processeur reste aux images) s'il marche."""
+    if wanted in ENCODERS:
+        return wanted
+    if "name" not in _ENCODER:
+        import subprocess
+
+        try:  # une seconde de vidéo d'essai : NVENC présent dans ffmpeg ne veut pas dire carte capable
+            subprocess.run([_ffmpeg(), "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=256x256:d=1", "-c:v", "h264_nvenc",
+                            "-f", "null", "-"], check=True, capture_output=True, timeout=30)
+            _ENCODER["name"] = "h264_nvenc"
+        except Exception:
+            _ENCODER["name"] = "libx264"
+    return _ENCODER["name"]
+
+
+def write_frames(clip, path, fps, threads=1, first=0, last=None, progress=None, codec="libx264"):
+    """Les images first → last (non comprise) de la vidéo, sans le son, plusieurs calculées en même temps.
+
+    moviepy les calcule une à une sur un seul cœur ; ici les calculs (OpenCV, numpy) de plusieurs
+    images avancent ensemble, chacune sur un cœur (mesuré : 127 images/s à 8 au lieu de 35).
+    """
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+
+    import cv2
+    import imageio_ffmpeg
+    import numpy as np
+
+    last = frame_count(clip, fps) if last is None else last
     w, h = clip.size
-    silent = str(path) + ".video.mp4"
-    out = imageio_ffmpeg.write_frames(silent, (w, h), fps=fps, codec="libx264", quality=None, macro_block_size=1,
-                                      ffmpeg_log_level="error", output_params=["-preset", "ultrafast", "-crf", "23"])
+    # en YUV 4:2:0, ce que l'encodeur garde de toute façon : deux fois moins à envoyer à ffmpeg (en RGB,
+    # le passage plafonnait à 57 images/s ; en YUV, 128), et la conversion se fait dans les fils
+    yuv = w % 2 == 0 and h % 2 == 0
+    out = imageio_ffmpeg.write_frames(str(path), (w, h), pix_fmt_in="yuv420p" if yuv else "rgb24", fps=fps, codec=codec,
+                                      quality=None, macro_block_size=1, ffmpeg_log_level="error", output_params=ENCODERS[codec])
     out.send(None)
-    shot = lambda k: np.ascontiguousarray(clip.get_frame(k / fps), dtype=np.uint8)
+
+    def shot(k):
+        rgb = np.ascontiguousarray(clip.get_frame(k / fps), dtype=np.uint8)
+        return cv2.cvtColor(rgb, cv2.COLOR_RGB2YUV_I420) if yuv else rgb
     cv_threads = cv2.getNumThreads()
-    if threads > 1:  # chaque image sur un cœur : mesuré 127 images/s à 8 contre 70 avec OpenCV seul sur 12 cœurs
+    if threads > 1:
         cv2.setNumThreads(1)
     try:
         with ThreadPoolExecutor(max_workers=threads) as pool:
             ahead = deque()
-            for k in range(n):
+            for k in range(first, last):
                 ahead.append(pool.submit(shot, k))
                 if len(ahead) >= 2 * threads:
                     out.send(ahead.popleft().result())
                     if progress and k % 24 == 0:
-                        progress(k - len(ahead), n)
+                        progress(k - first - len(ahead), last - first)
             while ahead:
                 out.send(ahead.popleft().result())
     finally:
         cv2.setNumThreads(cv_threads)
         out.close()
-    if worker:
-        worker.join()
-        if failed:
-            raise failed[0]
-    if sound:
-        subprocess.run([ffmpeg, "-v", "error", "-y", "-i", silent, "-i", sound["path"], "-map", "0:v", "-map", "1:a",
-                        "-c", "copy", "-shortest", str(path)], check=True)
-        os.remove(silent)
-        os.remove(sound["path"])
+
+
+def _readable(path):
+    import cv2
+
+    if not os.path.isfile(path) or os.path.getsize(path) < 1024:
+        return False
+    cap = cv2.VideoCapture(str(path))
+    try:
+        return cap.isOpened() and cap.get(cv2.CAP_PROP_FRAME_COUNT) > 0
+    finally:
+        cap.release()
+
+
+def frame_count(clip, fps):
+    return max(1, int(clip.duration * fps + 1e-6))
+
+
+def _join(videos, sound, path):
+    """Les morceaux d'images bout à bout, avec le son : rien n'est réencodé."""
+    import subprocess
+
+    if len(videos) == 1:
+        video = videos[0]
     else:
-        os.replace(silent, path)
+        listing = str(path) + ".list.txt"
+        with open(listing, "w", encoding="utf-8") as f:
+            f.writelines(f"file '{Path(v).resolve().as_posix()}'\n" for v in videos)
+        video = str(path) + ".video.mp4"
+        subprocess.run([_ffmpeg(), "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", listing, "-c", "copy", video],
+                       check=True)
+        os.remove(listing)
+    if sound:
+        subprocess.run([_ffmpeg(), "-v", "error", "-y", "-i", video, "-i", sound, "-map", "0:v", "-map", "1:a",
+                        "-c", "copy", "-shortest", str(path)], check=True)
+    else:
+        os.replace(video, path)
+    for v in set(videos + [video]):
+        if os.path.exists(v) and os.path.abspath(v) != os.path.abspath(path):
+            os.remove(v)
+    if sound and os.path.exists(sound):
+        os.remove(sound)
+
+
+def write_video(clip, path, fps, threads=1, audio_tmp=None, progress=None, loudness=None, codec="libx264"):
+    """Écrit la vidéo : les images (plusieurs en même temps) et, pendant ce temps, le son et son niveau.
+
+    Rendre des morceaux dans plusieurs programmes ne fait pas mieux : mesuré, le processeur est déjà
+    occupé à 93 % par un seul programme à 8 fils ; c'est l'encodage par la carte (NVENC) qui le soulage.
+    """
+    sound = _start_sound(clip, audio_tmp, loudness) if clip.audio is not None and audio_tmp else None
+    silent = str(path) + ".video.mp4"
+    if codec != "libx264" and min(clip.size) < 256:  # NVENC refuse les toutes petites vidéos
+        codec = "libx264"
+    try:
+        write_frames(clip, silent, fps, threads, progress=progress, codec=codec)
+        if not _readable(silent):  # ffmpeg ne dit pas toujours qu'il a échoué
+            raise RuntimeError("vidéo illisible")
+    except Exception as e:
+        if codec == "libx264":
+            raise
+        print(f"  [!] Encodage par la carte graphique impossible ({e}) : par le processeur")
+        _ENCODER["name"] = "libx264"
+        write_frames(clip, silent, fps, threads, progress=progress, codec="libx264")
+    _join([silent], sound() if sound else None, path)
     if progress:
+        n = frame_count(clip, fps)
         progress(n, n)
 
 
@@ -417,26 +518,38 @@ def run_render(chapter, cfg, force=False, progress=None):
     natural = bool(r.get("natural_rhythm", True))
 
     where = places_mod.frame_places(chapter, data)
+
+    def voice_file(i, seg):
+        path = chapter.root / seg["audio"]
+        space = (where[i] or {}).get("space") if r.get("voice_space", True) else None
+        if space and path.is_file():
+            try:
+                return places_mod.voice_in_space(chapter, path, space)  # chaleur et résonance du lieu
+            except Exception:
+                pass
+        return path
+
+    # toutes les voix et tous les bruitages ouverts ensemble : chacun lance ffmpeg (19 s un par un pour un épisode)
+    wanted = {}
+    for i, frame in enumerate(data["frames"]):
+        for k, seg in enumerate(frame.get("segments") or []):
+            wanted[("voice", i, k)] = lambda i=i, seg=seg: _load_audio(voice_file(i, seg))
+        for k, (path, _) in enumerate(sounds.get(frame["file"], [])):
+            wanted[("sound", i, k)] = lambda path=path: _load_audio(path)
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        ready = dict(zip(wanted, pool.map(lambda load: load(), wanted.values())))
+
     clips, audios, opened, durations, voiced, files, spoken = [], [], [], [], [], [], []
     for i, frame in enumerate(data["frames"]):
         img_path = chapter.frames_dir / frame["file"]
-        image = read_image(img_path)
-        if image is None:
+        image = None if scrolling else read_image(img_path)  # en défilement, la planche sert, pas la frame
+        if (not img_path.is_file()) if scrolling else image is None:
             print(f"  [!] Frame manquante ignorée : {frame['file']}")
             continue
         # les répliques de la frame l'une après l'autre (une voix par personnage), un court blanc entre deux
-        space = (where[i] or {}).get("space") if r.get("voice_space", True) else None
-
-        def voice_file(seg):
-            path = chapter.root / seg["audio"]
-            if space and path.is_file():
-                try:
-                    return places_mod.voice_in_space(chapter, path, space)  # chaleur et résonance du lieu
-                except Exception:
-                    pass
-            return path
-
-        loaded = [(seg, _load_audio(voice_file(seg))) for seg in frame.get("segments") or []]
+        loaded = [(seg, ready.get(("voice", i, k))) for k, seg in enumerate(frame.get("segments") or [])]
         loaded = [(seg, a) for seg, a in loaded if a]
         pieces = [a for _, a in loaded]
         t_in, said, starts_in = 0.0, [], []  # où commence chaque réplique dans la frame (sous-titres)
@@ -460,7 +573,7 @@ def run_render(chapter, cfg, force=False, progress=None):
         pad = rhythm.tail(loaded[-1][0], following) if natural and loaded else r["padding_seconds"]
         duration = voice.duration + pad / speed if voice else r["silent_frame_seconds"] / speed
 
-        hits = [(a, g) for a, g in ((_load_audio(p), g) for p, g in sounds.get(frame["file"], [])) if a]
+        hits = [(a, g) for a, g in ((ready.get(("sound", i, k)), g) for k, (_, g) in enumerate(sounds.get(frame["file"], []))) if a]
         opened += [a for a, _ in hits]
         if hits and not voice:
             duration = max(duration, min(3.0, max(h.duration for h, _ in hits) + 0.2))
@@ -531,6 +644,8 @@ def run_render(chapter, cfg, force=False, progress=None):
         files.append(frame["file"])
         spoken.append(said)
 
+    used = {id(a) for a in opened}
+    opened += [a for a in ready.values() if a is not None and id(a) not in used]  # fermés à la fin, comme les autres
     if not clips:
         print("  Rien à assembler.")
         return False
@@ -573,12 +688,12 @@ def run_render(chapter, cfg, force=False, progress=None):
             evts = events(lines, int(r.get("captions_words", 4)))
             if evts:
                 final = burn(final, evts, cfg, int(out_h * 0.7))
+        threads = int(r.get("threads", 0)) or max(1, min(8, (os.cpu_count() or 2) - 2))
         if layers:
             final = final.with_audio(CompositeAudioClip(layers).with_duration(final.duration))
         # le son temporaire dans le dossier du chapitre : deux rendus en même temps ne se gênent pas
-        threads = int(r.get("threads", 0)) or max(1, min(8, (os.cpu_count() or 2) - 2))
         write_video(final, tmp, r["fps"], threads, chapter.root / "video.part.audio.m4a", progress,
-                    loudness=float(r["loudness"]) if r.get("loudness") else None)
+                    loudness=float(r["loudness"]) if r.get("loudness") else None, codec=encoder(r.get("encoder", "auto")))
         final.close()
     finally:
         for c in clips + opened:
