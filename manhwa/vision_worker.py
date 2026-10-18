@@ -24,7 +24,7 @@ def main():
     from transformers import AutoModelForImageTextToText, AutoProcessor
 
     folder = os.path.join(root, ".cache", "models", "qwen3.5-2b")
-    if not os.path.isfile(os.path.join(folder, "model.safetensors")):
+    if not os.path.isfile(os.path.join(folder, "model.safetensors.index.json")):
         snapshot_download(MODEL, local_dir=folder)  # ≈ 4,6 Go, une fois
     cuda = torch.cuda.is_available()
     proc = AutoProcessor.from_pretrained(folder)

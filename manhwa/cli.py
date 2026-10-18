@@ -200,6 +200,12 @@ def cmd_make(args, cfg):
     return _for_each(args, cfg, "Chapitre", make)
 
 
+def cmd_doctor(args, cfg):
+    from manhwa import doctor
+
+    doctor.main(bench=not args.rapide)
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="python -m manhwa", description="Manhwa TikTok Automator")
     parser.add_argument("--config", help="autre fichier config.toml")
@@ -227,6 +233,10 @@ def build_parser():
     p.add_argument("--freeze", action="store_true", help="figer d'abord tes décisions actuelles comme référence")
     p.add_argument("--steps", nargs="+", choices=["kinds", "text", "speakers", "faces", "emotion", "sounds"])
     p.set_defaults(func=cmd_bench)
+
+    p = sub.add_parser("doctor", help="ce qui est installé, et combien de temps prendra un épisode ici")
+    p.add_argument("--rapide", action="store_true", help="sans la mesure de vitesse (10 s)")
+    p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("status", help="état des chapitres")
     p.add_argument("path", nargs="?", help="chapitre, série ou inbox (par défaut)")

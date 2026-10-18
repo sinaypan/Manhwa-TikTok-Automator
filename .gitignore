@@ -36,3 +36,6 @@ env/
 .cache/
 sfx/
 music/
+
+# raccourcis Windows (créés par l installateur sur le Bureau)
+*.lnk

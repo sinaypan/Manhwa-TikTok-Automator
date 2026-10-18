@@ -1,355 +1,252 @@
 # Manhwa TikTok Automator
 
-Transforme un chapitre de manhwa/webtoon en vidéo verticale 9:16 avec voix off.
+**Un lien de chapitre en entrée, une vidéo verticale doublée en sortie, déjà coupée en parties pour TikTok et YouTube Shorts.**
 
-**État : V3.** Un lien suffit : le Studio (une page web locale) télécharge le chapitre, le
-découpe, lit le texte et le corrige, reconnaît les personnages, choisit voix, sons et
-musique, crée la vidéo avec sous-titres karaoké, la réécoute, puis la coupe en parties
-de 60–90 s pour TikTok avec titre et hashtags. Tout se vérifie et se corrige d'un clic.
-Le détail et les mesures sont dans [PLAN_V2.md](PLAN_V2.md) et [PLAN_V3.md](PLAN_V3.md)
-(chaque modèle local n'est gardé que s'il fait mieux sur le banc de mesure).
+Le Studio, une page web qui tourne sur ton PC, fait tout le travail : il télécharge le chapitre, lit le texte, reconnaît les
+personnages, leur donne une voix qui joue l'émotion, fait bouger leur bouche, ajoute les bruitages, l'ambiance et la musique.
+Il fait ensuite défiler la planche comme sur un téléphone, avec des sous-titres karaoké. Quand il est sûr, il décide seul.
+Quand il doute, il te demande, un clic à la fois.
+
+Tout tourne en local et gratuitement. GPT ou Claude, facultatifs, aident pour la relecture et le choix des voix et des sons.
+Chaque modèle a une licence qui permet une chaîne monétisée (voir [Modèles et licences](#modèles-et-licences)).
+
+**Sommaire :** [Ce que ça fait](#ce-que-ça-fait) · [Installation](#installation) · [Premier épisode](#premier-épisode) ·
+[Combien de temps](#combien-de-temps) · [Comment c'est rangé](#comment-cest-rangé) · [Modèles et licences](#modèles-et-licences) ·
+[Guide complet du Studio](docs/GUIDE.md)
+
+## Ce que ça fait
+
+| | Étape | Avec quoi |
+|---|---|---|
+| 1 | **Télécharge le chapitre** depuis le lien de la série. Une vérification anti-robot se passe à la main, une fois. | Playwright (Chromium) |
+| 2 | **Découpe la planche** en cases et repère les bulles. | Règles d'image, détecteur de bulles |
+| 3 | **Lit le texte**, recolle les mots, écarte filigranes et onomatopées, puis le fait relire. | PaddleOCR, correction locale, GPT |
+| 4 | **Reconnaît les personnages** d'une case à l'autre et d'un épisode à l'autre, avec leurs noms tirés du wiki. | Détecteurs deepghs, CCIP, wiki Fandom |
+| 5 | **Comprend chaque case** (« il est projeté contre un mur, du sang gicle »). | Qwen3.5-2B |
+| 6 | **Donne une voix à chaque personnage**, qui joue l'émotion de chaque réplique, puis la réécoute pour vérifier. | Qwen3-TTS, Chatterbox, Whisper |
+| 7 | **Ajoute bruitages, ambiances et musique**, au bon volume, selon le lieu et la force du moment. | GPT, CLAP, sons Sonniss |
+| 8 | **Fait parler les visages** : la bouche bat à chaque syllabe et les yeux clignent. | FLUX.2 [klein] 4B |
+| 9 | **Monte la vidéo** : la planche défile, relief, tremblement sur les coups, sous-titres karaoké. | Depth Anything V2, rendu sur la carte graphique |
+| 10 | **Coupe en parties de 60 à 90 s** sur un moment de suspense, avec un titre et des hashtags. | Rythme du récit, GPT |
 
 ## Installation
 
-Pré-requis : [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) et
-[uv](https://docs.astral.sh/uv/) (ou Python 3.12 + pip).
+**Il te faut :**
+- Windows 10 ou 11 ;
+- une connexion internet ;
+- de la place sur le disque : environ **50 Go** pour l'installation complète, **5 Go** pour la légère ;
+- conseillé : une carte graphique **NVIDIA de 6 Go ou plus**. Sans elle, tout marche quand même, en profil léger.
+
+Pas besoin d'installer Python ni autre chose : l'installateur s'en occupe.
+
+1. **Télécharge le projet** : bouton vert **Code** → **Download ZIP**, puis extrais-le où tu veux. Si tu as Git :
+   ```bash
+   git clone https://github.com/sinaypan/Manhwa-TikTok-Automator.git
+   ```
+2. **Double-clique sur `Installer.bat`**, puis choisis un profil :
+
+   | | Complet | Léger |
+   |---|---|---|
+   | Pour qui | Une carte NVIDIA de 6 Go ou plus | N'importe quel PC |
+   | Voix | Voix décrites qui jouent l'émotion (Qwen3-TTS) | Voix de base (Kokoro, edge-tts) |
+   | Visages qui parlent | Oui | Non |
+   | Ce qui se passe dans les cases | Regardé en local (Qwen3.5-2B) | Par GPT, si tu as une clé |
+   | Bruitages pro (Sonniss) | Oui | Sons de base |
+   | Place sur le disque | ≈ 50 Go | ≈ 5 Go |
+
+3. **Double-clique sur « Manhwa Studio »**, sur le Bureau. Le Studio s'ouvre dans le navigateur.
+   Si tu as une clé GPT ou Claude (facultatif), colle-la dans les **Réglages** (roue dentée en haut à gauche).
+
+**Combien de temps dure l'installation :** surtout le téléchargement. Le profil complet télécharge environ **36 Go** :
+5 Go de bibliothèques, 28 Go de modèles et 2 Go de bruitages.
+
+| Connexion | Complet | Léger |
+|---|---|---|
+| 100 Mb/s | ≈ 55 min | ≈ 5 min |
+| 300 Mb/s | ≈ 20 min | ≈ 3 min |
+| Fibre 1 Gb/s | ≈ 12 min | ≈ 2 min |
+
+Une fois les fichiers téléchargés, l'installation elle-même prend environ 1 min. C'est mesuré sur une copie neuve du projet,
+dans les deux profils.
+
+**Mettre à jour :** télécharge la nouvelle version (ou `git pull`), puis relance `Installer.bat`. Tes chapitres (`inbox/`),
+ta clé (`.env`) et les modèles déjà téléchargés (`.cache/`) sont gardés.
+
+**Vérifier que tout est prêt** (l'installateur le fait à la fin) :
+
+```bash
+.venv\Scripts\python -m manhwa doctor
+```
+
+La commande affiche ta machine et ce qui est installé, avec ce qu'il faut faire pour ce qui manque. Elle mesure aussi en 10 s la
+vitesse de ton processeur et de ta carte, puis estime **combien de temps prendra un épisode chez toi**.
+
+<details>
+<summary>Options de l'installateur, et installation à la main</summary>
+
+```bash
+Installer.bat -Profil complet
+```
+```bash
+Installer.bat -Profil leger
+```
+```bash
+Installer.bat -SansModeles
+```
+```bash
+Installer.bat -SansSons
+```
+
+- `-Profil` choisit sans poser la question.
+- `-SansModeles` : les modèles se téléchargent au premier usage, plutôt que pendant l'installation.
+- `-SansSons` : sans la bibliothèque Sonniss.
+- `-SansCarte` : installe comme sur un PC sans carte NVIDIA.
+
+Les versions exactes de chaque environnement sont dans [install/](install/), figées sur la machine de test. À la main, avec
+[uv](https://docs.astral.sh/uv/) :
 
 ```bash
 uv venv --python 3.12 .venv
-uv pip install --python .venv -r requirements.txt -r requirements-dev.txt
+uv pip sync --python .venv\Scripts\python.exe install\lock-main-gpu.txt --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --index-strategy unsafe-best-match
 .venv\Scripts\python -m playwright install chromium
 ```
 
-Tesseract est cherché dans le PATH puis dans `C:\Program Files\Tesseract-OCR\`.
-Sinon, indique son chemin dans `config.toml` → `[ocr] tesseract_cmd`.
+Sans carte NVIDIA, la deuxième ligne devient `uv pip install --python .venv\Scripts\python.exe -r requirements.txt` (puis
+`uv pip install --no-deps kokoro-onnx==0.6.1`). Les modèles locaux vivent chacun dans leur environnement (`.venv-tts`,
+`.venv-qwen`, `.venv-edit`), pour que leurs bibliothèques ne se gênent pas. Chacun s'installe avec `uv venv` puis
+`uv pip sync install\lock-<nom>.txt --extra-index-url https://download.pytorch.org/whl/cu124 --index-strategy unsafe-best-match`.
 
-Copie `.env.example` en `.env` pour les clés d'API (utilisées à partir de la phase 3).
-`.env` n'est jamais commité.
+Tesseract est facultatif : c'est un troisième moteur de lecture, `[ocr] engine = "tesseract"`.
+</details>
 
-**Carte graphique NVIDIA** (facultatif) : la lecture du texte devient environ 26× plus
-rapide (0,07 s par case au lieu de 1,7 s sur une RTX 3050), et Whisper, Kokoro et les
-détecteurs aussi. Voir [requirements-gpu.txt](requirements-gpu.txt) ;
-tout la prend seul quand elle est là.
+## Premier épisode
 
-**Modèles locaux** (facultatifs, chacun dans son environnement pour ne rien casser) :
+1. Dans le Studio, **Ajouter des chapitres** (en haut à gauche) : colle le lien de la série et le numéro du chapitre. Si le site
+   affiche une vérification anti-robot, passe-la dans la fenêtre qui s'ouvre. La suite continue toute seule.
+2. Le Studio enchaîne **Tout faire** : texte, personnages, voix, sons, visages qui parlent, vidéo, parties. Compte environ
+   40 min sur la machine de test (voir [Combien de temps](#combien-de-temps)). Tu peux fermer le navigateur : le travail continue
+   tant que la fenêtre noire du Studio reste ouverte.
+3. Réponds à ce que le Studio te demande, s'il doute :
+   - qui parle ;
+   - un son ;
+   - un visage animé : **C'est bon**, **Pas animé** ou **Redessiner**.
 
-| Pour | Environnement | Installation |
-|---|---|---|
-| Voix qui jouent l'émotion (Chatterbox), ce qui se passe dans les cases (Qwen3.5-2B), l'écoute des sons (CLAP) | `.venv-tts` | voir `manhwa/chatterbox_tts.py` et `manhwa/vision.py` |
-| Voix décrites et jouées par Qwen3-TTS | `.venv-qwen` | voir `manhwa/qwen_voice.py` |
-| Visages qui parlent : bouches et yeux redessinés (FLUX.2 [klein] 4B) | `.venv-edit` | voir `manhwa/edit_worker.py` |
+   Tout ce qu'il a décidé seul est marqué « d'office » et se change d'un clic.
+4. **Onglet Vidéo** : regarde la vidéo. Un passage cloche ? Un clic sur la raison au bon moment, puis **Corriger** ouvre le bon
+   onglet sur la bonne case.
+5. **Découper** : les parties TikTok sont dans `<chapitre>/parts/`. **Copier** met le titre et les hashtags dans le
+   presse-papiers.
 
-**Bruitages et ambiances pro** (Sonniss, gratuits et utilisables sur une chaîne monétisée,
-≈ 2 Go dans `.cache/`, jamais commités) :
+Le mode d'emploi détaillé, onglet par onglet, est dans le **[Guide du Studio](docs/GUIDE.md)**.
 
-```bash
-.venv\Scripts\python -m manhwa.soundbank --download
-```
+## Combien de temps
 
-## Utilisation
+### La machine de test
 
-Toutes les commandes s'écrivent `.venv\Scripts\python -m manhwa <commande>`.
-
-### 1. Mettre des chapitres dans `inbox/`
-
-Un chapitre = un dossier `inbox/<série>/<chapitre>/`. Deux façons :
-
-- **À la main** : mets les images dans le dossier du chapitre, par exemple
-  `inbox/Solo Leveling/chapter-012/`. L'ordre suit les numéros des fichiers
-  (`2.jpg` passe bien avant `10.jpg`).
-- **Avec le scraper** :
-
-  ```bash
-  .venv\Scripts\python -m manhwa download "https://site/series/ma-serie" --chapters 1-5
-  ```
-
-  Sélection possible : `12`, `1-5`, `1-5,8,10-12`, `all`, `latest`. Sans `--chapters`,
-  la commande te demande. Si une vérification anti-robot s'affiche, passe-la dans la
-  fenêtre du navigateur puis appuie sur Entrée. Relancer la même commande reprend
-  là où ça s'était arrêté ; les chapitres déjà complets sont ignorés.
-
-  Les sélecteurs CSS de chaque site sont dans `config.toml` → `[scraper.sites.*]`.
-
-### 2. Le Studio
-
-Le plus simple : double-clique sur `Studio.bat` (ou sur un raccourci vers ce fichier).
-Le Studio démarre et s'ouvre dans le navigateur ; fermer la fenêtre noire l'arrête.
-S'il tourne déjà, le double-clic rouvre juste la page. En ligne de commande :
-
-```bash
-.venv\Scripts\python -m manhwa studio
-```
-
-Ouvre `http://127.0.0.1:8765/` dans le navigateur (rien n'est accessible depuis
-l'extérieur). À gauche, les séries et leurs épisodes avec leur avancement ; au centre,
-le chapitre avec la découpe déjà proposée :
-
-| Geste | Effet |
+| | |
 |---|---|
-| Clic sur une ligne | Supprimer la coupe |
-| Clic dans une case | Ajouter une coupe (aimantée sur la marge la plus proche) |
-| Glisser une ligne | L'ajuster |
-| Survol d'une case | Aperçu de sa frame 9:16 |
-| Ctrl+Z | Annuler |
+| Ordinateur | HP Victus 15 (portable) |
+| Processeur | Intel Core i5-13420H, 8 cœurs / 12 fils |
+| Mémoire | 16 Go |
+| Carte graphique | NVIDIA GeForce RTX 3050 Laptop, **6 Go** |
+| Disque | SSD NVMe |
+| Système | Windows 11 |
 
-Les lignes en pointillés et les badges orange (case très haute) sont les endroits à
-vérifier ; « Tout est bon » les valide d'un coup. **Créer la vidéo** lance frames →
-texte → voix → rendu en arrière-plan, et la vidéo s'affiche dans le Studio à la fin.
+### Mesuré : un épisode complet
 
-**Ajouter des chapitres** (en haut à gauche) : colle le lien de la série et les chapitres
-voulus ; le Studio télécharge, découpe, lit le texte, cherche les personnages, fait relire
-par GPT, choisit les voix et les sons, puis crée la vidéo, tout seul. Si le site demande
-une vérification, une fenêtre de navigateur s'ouvre : passe-la, la suite continue.
-Sur un chapitre déjà là, **Tout faire** lance les mêmes étapes. Sans clé GPT, les étapes
-GPT sont simplement sautées.
-
-**Pilote automatique** (`config.toml` → `[auto]`) : pendant « Tout faire », la machine
-décide seule ce qui est sûr. Elle met le son proposé, accepte les corrections de GPT et
-peut valider « qui parle » à partir d'une confiance réglable. Rien n'est caché : c'est
-marqué « d'office » dans le Studio et se change d'un clic. Un choix fait à la main n'est
-jamais remplacé. Le bouton **Mettre à jour la vidéo** apparaît dès qu'un changement n'est
-pas encore dans la vidéo.
-
-#### Onglet Vidéo
-
-La vidéo, et à côté la case en cours (qui parle, avec quelle voix, quel son). Un passage
-cloche ? Un clic sur la raison (mauvaise voix, texte faux, mauvais son, découpe) au bon
-moment. La liste des passages signalés permet de revoir chacun et **Corriger** ouvre
-l'onglet qu'il faut, sur la bonne case.
-
-**Contrôle automatique** : après la vidéo, Whisper (local) réécoute chaque réplique et
-signale celles où la voix ne dit pas ce qui est écrit (« La voix a dit… »). Il signale
-aussi une voix manquante et une case trop courte ou trop longue. Sur le ch. 1, il a
-trouvé 4 vraies erreurs, sans fausse alerte.
-
-**Sous-titres karaoké** : la réplique s'affiche par groupes de 4 mots et le mot dit passe
-en jaune (`[render] captions…`).
-
-**Parties pour TikTok** : « Découper » coupe la vidéo en parties de 60 à 90 s, de
-préférence sur un moment de suspense (une question, un cri, avant une nouvelle scène).
-Chaque partie s'ouvre sur « PART 2/5 » et reçoit un titre et des hashtags, que
-« Copier » met dans le presse-papiers. Les fichiers sont dans `<chapitre>/parts/`.
-
-#### Onglet Personnages
-
-Une fois la vidéo créée, l'onglet **Personnages** cherche tout seul les visages dans les
-frames et les range par personnage (≈ 20 s pour un chapitre). CCIP, un modèle fait pour
-reconnaître un personnage d'anime, les regroupe et reconnaît ceux de la série d'un
-épisode à l'autre : sur le ch. 1, il y a 14 visages à déplacer au lieu de 23. Les modèles
-sont téléchargés au premier usage dans `.cache/models/` et vérifiés par leur empreinte.
-
-| Geste | Effet |
-|---|---|
-| Écrire dans le champ d'un groupe | Nommer le personnage (pour toute la série) ; la liste propose les noms du wiki |
-| Clic sur un nom « Wiki : … » | Nommer d'après le wiki (genre, cheveux, caractère affichés) |
-| « Ne parle pas » | Ranger le personnage à part : il n'est plus jamais proposé pour une réplique |
-| Survol d'un visage ou d'une image | Le chapitre autour, en grand (la case de la vidéo encadrée en pointillés) |
-| Clic sur des visages, puis sur un personnage dans la barre du bas | Les ranger (ou « Nouveau personnage », « Pas un visage ») |
-| Clic sur le nombre d'un groupe | Sélectionner tous ses visages (pour fusionner deux groupes) |
-| Clic sur une tête dans l'image d'une réplique, ou sur sa pastille | Dire qui parle |
-| « Valider les N propositions » | Accepter d'un coup le personnage proposé (en pointillés) |
-
-Le personnage proposé est celui dont le visage est le plus proche de la bulle ; sans
-visage dans la case, celui des cases voisines. Un personnage secondaire sans groupe ?
-« Autre… » → **Figurant** (voix d'homme ou de femme, réglables dans la carte Figurants) ou
-**+ Nouveau personnage…** (il garde son nom pour la série). Si tu choisis quelqu'un d'autre
-que le visage encadré, le Studio propose de corriger ce visage (toutes les répliques suivent).
-
-**Wiki** : « Noms depuis le wiki » lit le wiki Fandom de la série (trouvé d'après son
-nom) : noms, genre, cheveux, chapitre d'apparition et caractère, sans les passages
-marqués spoiler. Un nom est proposé à un groupe d'après la couleur des cheveux et le
-chapitre d'apparition (jamais un personnage qui n'apparaît que plus tard). « Images du
-wiki » ouvre une fenêtre de navigateur : si Cloudflare demande une vérification, tu la
-passes à la main une fois, puis les images se téléchargent et leurs visages affinent
-les propositions. Tout est rangé dans `inbox/<série>/.wiki/`.
-
-### 3. Ou tout en ligne de commande
-
-```bash
-.venv\Scripts\python -m manhwa make
-```
-
-Pour chaque chapitre de `inbox/` (ou seulement celui indiqué en argument) :
-découpe automatique (si pas encore faite) → OCR → voix → `video.mp4` dans le dossier
-du chapitre. Chaque étape est mise en cache : relancer `make` ne refait que ce qui a
-changé. `make --manual` ouvre l'ancienne fenêtre de découpe à la main.
-
-Voir où en est chaque chapitre :
-
-```bash
-.venv\Scripts\python -m manhwa status
-```
-
-Les étapes existent aussi séparément : `cut` (découpe auto), `slice` (à la main),
-`ocr`, `tts`, `render` (avec `--force` pour refaire même si c'est à jour).
-
-### Lecture du texte (OCR)
-
-Le texte est lu par **PaddleOCR** (local, gratuit), puis regroupé en bulles dans l'ordre de
-lecture. Les onomatopées (coréennes ou anglaises), les filigranes du site, les crédits et
-les titres de chapitre sont repérés et **ne sont pas lus** par la voix ; les SFX sont gardés
-pour les bruitages. Le moteur se change dans `config.toml` (`[ocr] engine` : `paddle`,
-`windows` ou `tesseract`) ou ponctuellement avec `ocr --engine windows`.
-
-Pour comparer les moteurs sur un chapitre, mets une référence lue à la main dans
-`<chapitre>/.studio/ocr_gold.json` puis lance `python -m manhwa ocr-bench <chapitre>`.
-
-Pour mesurer tout ce que la machine décide seule (types de bulle, texte, qui parle,
-visages, ton, sons) par rapport à tes choix, utilise `python -m manhwa bench <chapitre>`.
-`--freeze` fige d'abord tes décisions actuelles comme référence, dans
-`.studio/gold.json`, qui n'est jamais commité. Chaque passage est gardé dans
-`.studio/bench_history.json`, et l'écart avec le passage précédent s'affiche
-(voir PLAN_V3.md).
-
-### Contrôles de la découpe à la main (`slice`)
-
-| Touche | Action |
-|---|---|
-| Molette, ↑ ↓ (← → pour un petit pas) | Faire défiler le chapitre |
-| Souris : glisser le centre / un coin | Déplacer / redimensionner le cadre |
-| `I` `J` `K` `L` | Déplacer le cadre |
-| `+` / `-` | Agrandir / réduire le cadre |
-| `Entrée` | Garder la frame (la vue avance à la suite) |
-| `Retour arrière` | Annuler la dernière frame |
-| `R` | Cadre plein écran |
-| `M` | Changer le fond (flou / noir / gris) |
-| `O` | Tester l'OCR sur le cadre |
-| `H` | Afficher/masquer l'aide |
-| `Q` / `Échap` | Terminer |
-
-#### Voix
-
-Avec Qwen3-TTS installé (`[tts] engine = "qwen"`), chaque personnage a une voix **décrite**
-(« jeune homme, voix basse, froide, sans émotion ») : GPT l'écrit d'après sa fiche, Qwen
-joue chaque réplique avec son émotion, puis la voix est ramenée au timbre du personnage pour
-rester la même d'une réplique à l'autre. ▶ fait entendre la voix, **Autre voix** en
-redemande une, **Modifier** pour l'écrire toi-même. Whisper réécoute chaque réplique : une
-réplique mal dite est refaite, puis dite par la voix de secours.
-
-Sans Qwen, **Proposer les voix** laisse GPT-4.1 choisir une voix d'après le
-genre, le caractère (wiki) et les répliques. Sans GPT, les accents alternent, les hauteurs
-sont décalées, et un personnage âgé selon le wiki parle plus grave. ▶ pour écouter, la
-liste pour changer, − / + pour une voix plus grave ou plus aiguë, **Valider**.
-
-La liste mêle les voix edge-tts (en ligne, les plus claires) et les 28 voix **Kokoro**
-(locales, 6 à 8 fois plus rapides). **Expressive** fait rejouer la voix par Chatterbox
-(local) avec l'émotion de chaque réplique. Il demande l'environnement `.venv-tts`, voir
-`manhwa/chatterbox_tts.py`. Le narrateur lit les encadrés de narration et les répliques
-sans personnage. Chaque réplique a son ton : celui de GPT, le tien, sinon il est deviné
-sur la ponctuation (« ?! » donne surpris…).
-
-#### Onglet Relecture (GPT-4.1)
-
-**Relire le chapitre** : GPT corrige les erreurs de lecture (« IDON'T THINK CAN » →
-« I DON'T THINK I CAN »), dit si une bulle est une réplique, une pensée, de la narration ou
-un bruitage, propose qui parle et note le ton de chaque réplique. Rien ne change sans ton
-accord, sauf le ton, modifiable sur chaque réplique de l'onglet Personnages. Environ
-3 minutes pour un chapitre. Les propositions arrivent une à une : **Accepter** (`A`),
-**Refuser** (`R`) ou **Corriger moi-même** (`E`, ta version est gardée même si GPT relit
-à nouveau) ; la suivante prend sa place. « Déjà décidées », en bas, pour changer d'avis.
-
-Avant GPT, une **correction locale** recolle les mots collés (« IDON'T » → « I DON'T »),
-retire les lettres perdues et repère le charabia, sans jamais toucher aux noms de la
-série. Les cas moins sûrs (« AWAK » → « AWAKE ») attendent ici, marqués « Correction
-locale ».
-
-**Toutes les bulles** (deuxième onglet) : chaque bulle du chapitre, une à une. Tu
-corriges le texte, choisis le type (réplique, pensée, narration, bruitage, pas du texte),
-puis **C'est bon** (ou Entrée). Une bulle vérifiée n'est plus touchée par GPT, et elle
-sert de référence au banc de mesure.
-
-#### Onglet Sons
-
-En haut, **la bande-son de l'épisode** : chaque case qui peut avoir un son, dans l'ordre
-(violet : à choisir, vert : choisi, gris : sans son). Dessous, une case à la fois, en grand :
-**ce qui se passe** (« Personnage poussé, sang »), le son proposé (un ou deux sons ensemble)
-et pourquoi. **Valider** (Entrée), **Aucun son** (N), **Écouter avec la voix** (Espace),
-← → pour passer d'une case à l'autre ; « + » à côté d'une idée met les deux sons ensemble.
-La case suivante arrive au bout de 2 s, son bouton au même endroit (la souris qui bouge sur
-la case la retient).
-
-Pour proposer : un modèle local (Qwen3.5-2B) décrit chaque case, puis GPT choisit les sons
-d'après l'histoire, la force du moment (le volume suit) et ce qu'on doit entendre ; CLAP, un
-modèle qui écoute, prend dans la bibliothèque pro la prise la plus proche. Tes propres sons se
-rangent dans `sfx/<catégorie>/`.
-
-**Les sons appris de tes choix** : SigLIP 2 (local) compare chaque case à celles où tu as déjà
-choisi un son, dans tous tes épisodes. Avant chaque proposition, cette mémoire se teste sur tes
-choix (chaque case devinée par les autres) : elle ne sert que si elle fait mieux que la
-proposition habituelle. Avec un seul épisode, elle attend (46 % contre 83 % sur l'épisode 1).
-
-**Visages qui parlent** (onglet Personnages) : pour chaque personnage qui parle, l'IA
-(FLUX.2 [klein] 4B, Apache 2.0, 7 à 9 s par dessin sur une carte de 6 Go) redessine dans le style
-de la case trois bouches et les yeux fermés ; dans la vidéo, la bouche bat à chaque syllabe et
-les yeux clignent. Un aperçu animé par visage : **C'est bon**, **Pas animé**, ou **Redessiner**
-(l'IA le refait autrement). Réglé par `[render] talk`.
-
-**Les lieux** : GPT coupe l'épisode en lieux (prison, marché, forêt…) ; chacun a une ambiance
-de fond, très basse, et les voix y résonnent comme dans le lieu. **L'image réagit** aux
-coups : zoom « punch », tremblement, flash ; pendant chaque case, la caméra glisse en relief
-(le premier plan bouge plus que le fond). Tout se règle dans `[render]` : `effects`, `depth`,
-`ambience`, `voice_space`, `loudness`.
-
-**La planche défile** (`[render] layout = "scroll"`, par défaut) : comme sur un téléphone, la
-vidéo glisse de case en case au lieu de montrer une case par image ; la caméra zoome pour que la
-case lue remplisse la largeur (`scroll_fit`), s'arrête dessus le temps des répliques, et sur une
-case plus haute que l'écran va voir la bulle de chaque réplique. Rien n'est coupé : les blancs
-(ou noirs) entre les cases sont ceux de l'auteur. Sur un coup, la caméra arrive d'un coup sec
-(le tremblement suit) ; vers un autre lieu, un court fondu (`smart_transitions`).
-`layout = "cases"` revient à une case par image.
-
-La **musique suit l'ambiance** : calme, tension, combat ou tristesse, d'après ce que
-montrent les cases et le ton des répliques. Elle change avec la scène, en fondu, et
-baisse quand on parle. Tes morceaux vont dans `music/calm/`, `music/tension/`,
-`music/combat/` et `music/sad/` ; sans eux, une nappe générée, libre de droits, est
-utilisée. Pour garder un seul morceau, mets son chemin dans `[render] music`. Au rendu, une case plus haute que l'écran défile en pleine largeur, les autres
-zooment très légèrement, et chaque case pousse la précédente vers le haut comme un
-webtoon qu'on fait défiler (`[render]` dans config.toml : `zoom`, `pan`, `transition`,
-`music_volume`…).
-
-#### Clé GPT
-
-La roue dentée en haut à gauche ouvre les **Réglages** : adresse du proxy, modèle et clé,
-enregistrés dans `.env` (jamais commité). La clé change chaque jour : colle la nouvelle
-ici, « Enregistrer et tester » vérifie qu'elle marche. Une clé **Claude** (Anthropic,
-console.anthropic.com) peut s'y ajouter : sans clé GPT, ou quand elle a expiré, Claude
-(Haiku 5.5) prend le relais.
-
-### Combien de temps
-
-Mesuré sur un épisode neuf de 142 cases et 144 répliques (RTX 3050 6 Go), avec « Tout faire » :
+Un épisode neuf de 142 cases et 144 répliques, en profil complet avec « Tout faire ». Il donne une vidéo de 9 min, coupée en
+8 parties.
 
 | Étape | Durée |
 |---|---|
-| Frames, lecture du texte, visages, ce que montrent les cases | ≈ 1,5 min |
-| Ce qui se passe dans les cases (Qwen3.5-2B, 6 à la fois) | ≈ 4,5 min |
-| Relecture, voix, sons, lieux (GPT ou Claude) | quelques secondes chacune |
-| Visages qui parlent (22 visages, 4 dessins chacun) | ≈ 10 à 14 min |
-| Voix (Qwen3-TTS, puis le timbre de chaque personnage, réécoute comprise) | ≈ 12 à 15 min |
-| Rendu de la vidéo (9 min ; images calculées et encodées par la carte graphique) | ≈ 2,5 min |
+| Frames, lecture du texte, visages | ≈ 1 min |
+| Ce qui se passe dans les cases (Qwen3.5-2B, 6 cases à la fois) | ≈ 4,5 min |
+| Relecture, voix, sons, lieux (GPT ou Claude) | < 1 min |
+| Visages qui parlent (22 visages, 4 dessins chacun) | ≈ 14 min |
+| Voix (Qwen3-TTS, puis le timbre de chaque personnage, réécoute comprise) | ≈ 13,5 min |
+| Rendu de la vidéo (images calculées et encodées par la carte graphique) | ≈ 2,5 min |
 | Réécoute et découpe en parties | ≈ 1 min |
+| **Total** | **≈ 38 min** |
 
-Chaque étape garde ce qu'elle a fait : relancée, elle ne refait que ce qui a changé (une
-étape coupée en route reprend là où elle s'était arrêtée). Le Studio note la durée de
-chaque étape dans sa console.
+Les modèles se téléchargent une fois, à l'installation. Chaque étape garde ce qu'elle a fait : relancée, elle ne refait que ce
+qui a changé, et une étape coupée en route reprend là où elle s'était arrêtée. Le Studio note la vraie durée de chaque étape
+dans sa console.
 
-## Dossier d'un chapitre
+### Estimé : d'autres machines
+
+Ces chiffres ne sont **pas mesurés** : ce sont les durées de la machine de test, mises à l'échelle de la vitesse de chaque carte
+et processeur (± 30 %). Pour ta machine, `doctor` fait le même calcul à partir d'une vraie mesure de 10 s.
+
+| Machine | Profil | Un épisode |
+|---|---|---|
+| RTX 3050 Laptop 6 Go (la machine de test) | Complet | **≈ 38 min** (mesuré) |
+| RTX 3060 12 Go, RTX 4060 8 Go | Complet | ≈ 22 min |
+| RTX 4070 12 Go | Complet | ≈ 14 min |
+| RTX 4090 24 Go | Complet | ≈ 11 min |
+| Carte NVIDIA de 4 Go (GTX 1650…) | Léger | ≈ 10 min |
+| Sans carte NVIDIA, processeur récent | Léger | ≈ 12 min |
+
+Le profil léger va plus vite parce qu'il saute ce qui prend le plus de temps : les voix qui jouent l'émotion et les visages qui
+parlent. La vidéo est plus simple, mais elle est bien là.
+
+## Comment c'est rangé
 
 ```
-inbox/<série>/characters.json   personnages de la série (noms)
-inbox/<série>/chapter-012/
-  pages/          images source (ou directement à la racine du chapitre)
-  frames/         frames 9:16
-  audio/          une voix par réplique
-  .studio/        cache du Studio (profil du chapitre, vignettes, visages)
-  project.json    état de chaque étape (coupes, crops, textes…)
-  video.mp4       résultat
+Installer.bat          installe ou met à jour (install/install.ps1)
+Studio.bat             lance le Studio (le raccourci du Bureau pointe ici)
+config.toml            tous les réglages, commentés
+install/               l'installateur et les versions exactes de chaque environnement
+manhwa/                le programme (ci-dessous)
+manhwa/studio/         le Studio : serveur local (FastAPI) et page web
+tests/                 les tests (pytest)
+docs/                  le guide du Studio, les plans et leurs mesures
+inbox/<série>/<ch>/    tes chapitres et tout ce que le Studio en fait (jamais commité)
+.cache/                modèles et sons téléchargés (jamais commité)
 ```
 
-## Configuration
+| Rôle | Modules (`manhwa/`) |
+|---|---|
+| Récupérer | `ingest/scraper.py` (chapitres), `ingest/wiki.py` (personnages du wiki Fandom) |
+| Découper | `panels.py` (cases), `slicer.py` (découpe à la main), `images.py` |
+| Lire | `ocr.py`, `ocr_engines.py`, `bubbles.py`, `textfix.py`, `review.py` (relecture GPT), `llm.py` |
+| Personnages | `faces.py` (visages), `cast.py` (qui parle) |
+| Comprendre | `vision.py` (ce qui se passe), `scene.py`, `emotion.py`, `places.py` (lieux), `moods.py` (ambiance) |
+| Voix | `voices.py`, `qwen_voice.py`, `chatterbox_tts.py`, `kokoro_tts.py`, `tts.py`, `rhythm.py`, `listen.py` (réécoute) |
+| Sons | `sfx.py`, `soundbank.py`, `sonniss.py`, `sound_memory.py`, `ambient.py` |
+| Vidéo | `render.py`, `scroll.py`, `scroll_gpu.py`, `motion.py`, `captions.py`, `talk.py` (visages qui parlent), `parts.py` |
+| Outils | `cli.py`, `doctor.py`, `bench.py`, `ocr_bench.py`, `pilot.py`, `progress.py`, `project.py`, `config.py`, `gpu.py` |
 
-Tout se règle dans [config.toml](config.toml) : voix (`[tts]`), rythme de la vidéo (`[render] speed`, 1,25 par défaut), fond des
-frames (`[slicer]`), durée des frames sans texte (`[render]`), sites du scraper…
+Les gros modèles (Qwen, FLUX, Chatterbox, CLAP) tournent dans de petits programmes à part (`*_worker.py`), avec leur propre
+environnement. Un seul est chargé à la fois, ce qui fait tenir tout le projet sur une carte de 6 Go.
+
+## Modèles et licences
+
+Un modèle n'est gardé que s'il fait mieux sur le banc de mesure et si sa licence permet une chaîne monétisée. Le détail des
+mesures est dans [docs/PLAN_V3.md](docs/PLAN_V3.md).
+
+| Modèle | Pour quoi | Licence | Taille |
+|---|---|---|---|
+| PaddleOCR (PP-OCR) | lire le texte | Apache 2.0 | 0,15 Go |
+| comic-text-and-bubble-detector | bulles | Apache 2.0 | 0,2 Go |
+| anime face / head / person (deepghs) | visages, têtes, corps | MIT | 0,1 Go |
+| CCIP (deepghs) | reconnaître un personnage | OpenRAIL | 0,15 Go |
+| DINOv2 small | regrouper les visages | Apache 2.0 | 0,08 Go |
+| CLIP ViT-B/32 | ce que montrent les cases | MIT | 0,15 Go |
+| roberta-base-go_emotions | le ton des répliques | MIT | 0,12 Go |
+| Depth Anything V2 Small | relief de la caméra | Apache 2.0 | 0,05 Go |
+| Qwen3.5-2B | ce qui se passe dans les cases | Apache 2.0 | 4,3 Go |
+| Qwen3-TTS 1.7B VoiceDesign | voix qui jouent l'émotion | Apache 2.0 | 4,2 Go |
+| Chatterbox (Resemble AI) | timbre de chaque personnage, voix de secours | MIT | ≈ 3 Go |
+| Kokoro-82M | voix de base, locales | Apache 2.0 | 0,34 Go |
+| faster-whisper small | réécouter les voix | MIT | 0,5 Go |
+| CLAP (LAION) | écouter et ranger les sons | Apache 2.0 | 0,7 Go |
+| SigLIP 2 | les sons appris de tes choix | Apache 2.0 | 0,18 Go |
+| FLUX.2 [klein] 4B | visages qui parlent | Apache 2.0 | 14,9 Go |
+| Sons Sonniss (GDC bundles) | bruitages et ambiances | libres de droits, usage commercial permis | 2,2 Go |
+| GPT-4.1 ou Claude (en ligne, facultatif) | relecture, voix, sons, lieux, titres | selon ton abonnement | — |
+
+Les sons Sonniss ne doivent être ni redistribués ni utilisés pour entraîner une IA. Ils restent donc dans `.cache/`, qui n'est
+jamais commité. espeak-ng (la prononciation de Kokoro) est sous GPL-3.0, ce qui ne change rien pour les vidéos.
 
 ## Tests
 
@@ -357,7 +254,13 @@ frames (`[slicer]`), durée des frames sans texte (`[render]`), sites du scraper
 .venv\Scripts\python -m pytest
 ```
 
-## Disclaimer
+## Pour aller plus loin
 
-Projet destiné à un usage personnel ou éducatif. Respecte les droits d'auteur des
-œuvres originales et les conditions des plateformes où tu publies.
+- [Guide du Studio](docs/GUIDE.md) : chaque onglet, chaque geste, la ligne de commande, les réglages.
+- [Plan V2](docs/PLAN_V2.md) et [Plan V3](docs/PLAN_V3.md) : comment le projet a été construit, avec les mesures de chaque choix.
+
+## Avertissement
+
+Projet destiné à un usage personnel ou éducatif. Les manhwas appartiennent à leurs auteurs. Avant de publier, vérifie que tu
+as le droit d'utiliser l'œuvre, et respecte les règles des plateformes : droits d'auteur, contenu réutilisé, label
+« contenu généré par IA ».
