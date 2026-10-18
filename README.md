@@ -314,10 +314,10 @@ Mesuré sur un épisode neuf de 142 cases et 144 répliques (RTX 3050 6 Go), ave
 | Étape | Durée |
 |---|---|
 | Frames, lecture du texte, visages, ce que montrent les cases | ≈ 1,5 min |
-| Ce qui se passe dans les cases (Qwen3.5-2B, 6 à la fois) | ≈ 5 min |
+| Ce qui se passe dans les cases (Qwen3.5-2B, 6 à la fois) | ≈ 4,5 min |
 | Relecture, voix, sons, lieux (GPT ou Claude) | quelques secondes chacune |
-| Visages qui parlent (22 visages, 4 dessins chacun) | ≈ 10 min |
-| Voix (Qwen3-TTS, puis le timbre de chaque personnage) | ≈ 12 min |
+| Visages qui parlent (22 visages, 4 dessins chacun) | ≈ 10 à 14 min |
+| Voix (Qwen3-TTS, puis le timbre de chaque personnage, réécoute comprise) | ≈ 12 à 15 min |
 | Rendu de la vidéo (8 min) | ≈ 3,5 min |
 | Réécoute et découpe en parties | ≈ 1 min |
 
