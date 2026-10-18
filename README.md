@@ -39,11 +39,28 @@ Chaque modèle a une licence qui permet une chaîne monétisée (voir [Modèles 
 
 Pas besoin d'installer Python ni autre chose : l'installateur s'en occupe.
 
+### En une ligne
+
+Ouvre **PowerShell** (touche Windows, tape « PowerShell », Entrée), colle cette ligne, puis Entrée :
+
+```powershell
+irm https://raw.githubusercontent.com/sinaypan/Manhwa-TikTok-Automator/main/install/get.ps1 | iex
+```
+
+Ensuite, plus rien à faire :
+- le projet se télécharge dans `C:\Users\<toi>\Manhwa Studio` (hors OneDrive, pour ne pas synchroniser 28 Go de modèles) ;
+- le profil qui convient à ta carte graphique est choisi tout seul (voir le tableau plus bas) ;
+- tout s'installe, puis le Studio s'ouvre.
+
+Pour **mettre à jour**, relance la même ligne. Ce que fait le script est lisible dans [install/get.ps1](install/get.ps1).
+
+### Ou en trois gestes
+
 1. **Télécharge le projet** : bouton vert **Code** → **Download ZIP**, puis extrais-le où tu veux. Si tu as Git :
    ```bash
    git clone https://github.com/sinaypan/Manhwa-TikTok-Automator.git
    ```
-2. **Double-clique sur `Installer.bat`**, puis choisis un profil :
+2. **Double-clique sur `Installer.bat`**, puis choisis un profil (Entrée prend celui qui convient à ta carte) :
 
    | | Complet | Léger |
    |---|---|---|
@@ -69,7 +86,7 @@ Pas besoin d'installer Python ni autre chose : l'installateur s'en occupe.
 Une fois les fichiers téléchargés, l'installation elle-même prend environ 1 min. C'est mesuré sur une copie neuve du projet,
 dans les deux profils.
 
-**Mettre à jour :** télécharge la nouvelle version (ou `git pull`), puis relance `Installer.bat`. Tes chapitres (`inbox/`),
+**Mettre à jour :** relance la ligne PowerShell, ou télécharge la nouvelle version (ou `git pull`) et relance `Installer.bat`. Tes chapitres (`inbox/`),
 ta clé (`.env`) et les modèles déjà téléchargés (`.cache/`) sont gardés.
 
 **Vérifier que tout est prêt** (l'installateur le fait à la fin) :

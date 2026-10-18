@@ -73,5 +73,5 @@ def test_one_line_install():
     assert not raw.startswith(b"\xef\xbb\xbf")  # lu par « irm | iex » : un BOM deviendrait un caractère parasite
     text = raw.decode("utf-8")
     assert "raw.githubusercontent.com/sinaypan/Manhwa-TikTok-Automator/main/install/get.ps1" in text
-    assert "install\install.ps1" in text and '"-Profil", "auto"' in text
+    assert r"install\install.ps1" in text and '"-Profil", "auto"' in text
     assert '"auto"' in (ROOT / "install" / "install.ps1").read_text(encoding="utf-8-sig")
