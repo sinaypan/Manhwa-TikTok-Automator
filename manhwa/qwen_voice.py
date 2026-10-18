@@ -107,6 +107,9 @@ def _start(name):
         return w
     close()  # un seul gros modèle à la fois sur la carte graphique
     chatterbox_tts.close()
+    from manhwa.gpu import release_models
+
+    release_models()
     here = os.path.dirname(os.path.abspath(__file__))
     cmd = ([str(python()), "-u", os.path.join(here, "qwen_worker.py")] if name == "qwen"
            else [str(chatterbox_tts.python()), "-u", os.path.join(here, "chatterbox_worker.py"), "--vc"])

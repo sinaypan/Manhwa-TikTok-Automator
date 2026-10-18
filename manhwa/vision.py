@@ -55,6 +55,9 @@ def _worker():
     from manhwa import chatterbox_tts
 
     chatterbox_tts.close()  # les deux ne tiennent pas ensemble dans 6 Go
+    from manhwa.gpu import release_models
+
+    release_models()
     worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vision_worker.py")
     p = subprocess.Popen([str(chatterbox_tts.python()), "-u", worker], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.DEVNULL, text=True, encoding="utf-8", cwd=str(ROOT))

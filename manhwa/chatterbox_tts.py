@@ -67,6 +67,9 @@ def _worker():
     if w and w.poll() is None:
         return w
     worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chatterbox_worker.py")
+    from manhwa.gpu import release_models
+
+    release_models()  # la carte pour Chatterbox, pas pour les petits modèles du Studio
     p = subprocess.Popen([str(python()), "-u", worker], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.DEVNULL, text=True, encoding="utf-8", cwd=str(ROOT))
     if not _answer(p).get("ready"):

@@ -1842,7 +1842,7 @@ function talkSection() {
     el('div', { class: 'grow' }, el('h3', { text: 'Visages qui parlent' }),
       el('p', { class: 'muted', text: 'Quand un personnage parle, sa bouche bat au rythme de sa voix et ses yeux clignent : l’IA redessine la bouche (fermée, entrouverte, ouverte) et les yeux fermés, dans le style de la case.' })),
     !t.faces.length && t.available && !busy
-      ? el('button', { type: 'button', class: 'pill accent', onclick: () => runTalk() }, icon('sparkles'), `Dessiner les ${t.talkers} visages (≈ ${Math.max(1, Math.round(t.talkers * 1.2))} min)`)
+      ? el('button', { type: 'button', class: 'pill accent', onclick: () => runTalk() }, icon('sparkles'), `Dessiner les ${t.talkers} visages (≈ ${Math.max(1, Math.round(t.talkers * 0.6))} min)`)
       : null);
   if (!t.faces.length) return el('section', { class: 'cast-block', id: 'talk-block' }, head);
   return el('section', { class: 'cast-block', id: 'talk-block' }, head,
@@ -1868,7 +1868,7 @@ function talkRow(f) {
         : [
             el('button', { type: 'button', class: 'pill accent', onclick: () => decideTalk(f, true) }, icon('check'), 'C’est bon'),
             el('button', { type: 'button', class: 'pill', onclick: () => decideTalk(f, false) }, 'Pas animé'),
-            el('button', { type: 'button', class: 'link quiet', title: 'L’IA redessine ce visage autrement (≈ 1 min)', onclick: () => runTalk(f.id) }, 'Redessiner'),
+            el('button', { type: 'button', class: 'link quiet', title: 'L’IA redessine ce visage autrement (≈ 40 s)', onclick: () => runTalk(f.id) }, 'Redessiner'),
           ]));
 }
 
@@ -1897,7 +1897,7 @@ async function runTalk(face = '') {
     if (face) state.talkKeys.add(face);
     renderCast();
     schedulePoll(500);
-    toast(face ? 'Je redessine ce visage (≈ 1 min)' : 'Les visages se dessinent : tu peux continuer pendant ce temps');
+    toast(face ? 'Je redessine ce visage (≈ 40 s)' : 'Les visages se dessinent : tu peux continuer pendant ce temps');
   } catch (e) {
     toast(`Impossible : ${e.message}`);
   }
@@ -2677,7 +2677,7 @@ function renderSounds() {
   if (!s.understood && !busy)
     parts.push(el('div', { class: 'notice' }, icon('sparkles'),
       el('p', { class: 'grow', text: s.gpt.configured
-        ? `Je peux regarder ce qui se passe dans chaque case (${s.vision === 'local' ? 'en local, ≈ 10 min pour un épisode' : 'avec GPT'}), puis choisir les sons d’après l’histoire : un coup contre un mur, une lame qu’on dégaine, du sang…`
+        ? `Je peux regarder ce qui se passe dans chaque case (${s.vision === 'local' ? 'en local, ≈ 5 min pour un épisode' : 'avec GPT'}), puis choisir les sons d’après l’histoire : un coup contre un mur, une lame qu’on dégaine, du sang…`
         : 'Pour des sons choisis d’après ce qui se passe dans chaque case, colle la clé GPT (Réglages). En attendant : d’après ce que montre l’image.' }),
       s.gpt.configured ? el('button', { type: 'button', class: 'pill accent', onclick: suggestSounds }, icon('sparkles'), 'Comprendre les cases') : null));
   parts.push(soundStrip(), soundStage(), placesCard(), musicCard(s));

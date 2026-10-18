@@ -386,7 +386,7 @@ def create_app(cfg):
 
     @app.post("/api/talk/run")
     def talk_run(id: str = Query(...), face: str = Query("")):
-        """Dessine les visages qui parlent (≈ 1 min par visage) ; avec face, redessine celui-là autrement."""
+        """Dessine les visages qui parlent (≈ 40 s par visage) ; avec face, redessine celui-là autrement."""
         from manhwa import talk
 
         if talk.edit_python() is None:

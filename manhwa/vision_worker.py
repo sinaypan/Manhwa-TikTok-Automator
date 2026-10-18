@@ -12,7 +12,7 @@ import os
 import sys
 
 MODEL = "Qwen/Qwen3.5-2B"  # Apache 2.0 : utilisable sur une chaîne monétisée
-MAX_SIDE = 768  # assez pour lire l'action, ≈ 4 s par case sur une RTX 3050
+MAX_SIDE = 768  # assez pour lire l'action ; ≈ 2 s par case sur une RTX 3050, 6 à la fois
 
 
 def main():

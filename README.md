@@ -279,7 +279,7 @@ choix (chaque case devinée par les autres) : elle ne sert que si elle fait mieu
 proposition habituelle. Avec un seul épisode, elle attend (46 % contre 83 % sur l'épisode 1).
 
 **Visages qui parlent** (onglet Personnages) : pour chaque personnage qui parle, l'IA
-(FLUX.2 [klein] 4B, Apache 2.0, ≈ 20 s par dessin sur une carte de 6 Go) redessine dans le style
+(FLUX.2 [klein] 4B, Apache 2.0, 7 à 9 s par dessin sur une carte de 6 Go) redessine dans le style
 de la case trois bouches et les yeux fermés ; dans la vidéo, la bouche bat à chaque syllabe et
 les yeux clignent. Un aperçu animé par visage : **C'est bon**, **Pas animé**, ou **Redessiner**
 (l'IA le refait autrement). Réglé par `[render] talk`.
@@ -306,6 +306,24 @@ enregistrés dans `.env` (jamais commité). La clé change chaque jour : colle l
 ici, « Enregistrer et tester » vérifie qu'elle marche. Une clé **Claude** (Anthropic,
 console.anthropic.com) peut s'y ajouter : sans clé GPT, ou quand elle a expiré, Claude
 (Haiku 5.5) prend le relais.
+
+### Combien de temps
+
+Mesuré sur un épisode neuf de 142 cases et 144 répliques (RTX 3050 6 Go), avec « Tout faire » :
+
+| Étape | Durée |
+|---|---|
+| Frames, lecture du texte, visages, ce que montrent les cases | ≈ 1,5 min |
+| Ce qui se passe dans les cases (Qwen3.5-2B, 6 à la fois) | ≈ 5 min |
+| Relecture, voix, sons, lieux (GPT ou Claude) | quelques secondes chacune |
+| Visages qui parlent (22 visages, 4 dessins chacun) | ≈ 10 min |
+| Voix (Qwen3-TTS, puis le timbre de chaque personnage) | ≈ 12 min |
+| Rendu de la vidéo (8 min) | ≈ 3,5 min |
+| Réécoute et découpe en parties | ≈ 1 min |
+
+Chaque étape garde ce qu'elle a fait : relancée, elle ne refait que ce qui a changé (une
+étape coupée en route reprend là où elle s'était arrêtée). Le Studio note la durée de
+chaque étape dans sa console.
 
 ## Dossier d'un chapitre
 

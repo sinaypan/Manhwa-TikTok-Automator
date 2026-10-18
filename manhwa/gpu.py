@@ -53,3 +53,31 @@ def before_paddle():
         import ctranslate2  # noqa: F401
     except Exception:
         pass
+
+
+# les petits modèles chargés dans le programme du Studio (lecture du texte, visages, relief, CLIP…)
+KEPT = (("manhwa.ocr_engines", "_cache"), ("manhwa.motion", "_DEPTH"), ("manhwa.faces", "_MODELS"),
+        ("manhwa.scene", "_MODELS"), ("manhwa.sound_memory", "_S"), ("manhwa.listen", "_MODEL"),
+        ("manhwa.kokoro_tts", "_ENGINE"))
+
+
+def release_models():
+    """Rend la carte graphique avant un gros modèle lancé à part (description, dessins, voix).
+
+    Les petits modèles du Studio y gardent ≈ 1 Go (mesuré : lecture du texte 0,4, relief 0,3,
+    visages 0,3) : avec un gros modèle de 5 Go à côté, la carte de 6 Go déborde dans la mémoire
+    du PC et tout ralentit (jusqu'à 4 fois). Ils se rechargent d'eux-mêmes au besoin.
+    """
+    import gc
+
+    for module, name in KEPT:
+        m = sys.modules.get(module)
+        if m is not None and isinstance(getattr(m, name, None), dict):
+            getattr(m, name).clear()
+    gc.collect()
+    paddle = sys.modules.get("paddle")
+    if paddle is not None:
+        try:
+            paddle.device.cuda.empty_cache()
+        except Exception:
+            pass

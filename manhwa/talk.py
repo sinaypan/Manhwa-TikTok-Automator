@@ -33,6 +33,8 @@ MOUTHS = (0.0, 0.55, 1.0)  # trois bouches : fermée, entrouverte, ouverte
 SYLLABLE = 9     # ±0,15 s autour de l'instant : assez pour voir où on en est dans la syllabe
 MIN_FACE = 100   # px dans la case : en dessous, la bouche est trop petite pour qu'on la voie bouger
 EDIT_SIDE = 640  # le carré redessiné (multiple de 16) : 9 s par dessin ; à 768, 17 s et la carte de 6 Go déborde
+SMALL_SIDE = 512  # un visage de moins de 560 px à l'écran : 6,6 s par dessin, la bouche aussi nette
+SCREEN_W = 1080
 TALK_VERSION = 1  # à incrémenter quand les dessins changent : ils sont refaits
 
 STATES = {
@@ -151,6 +153,11 @@ def square(face, crop_w, crop_h):
     return [x0, y0, side]
 
 
+def edit_side(side, crop_w):
+    """La taille du dessin : celle du visage à l'écran (case en pleine largeur), 512 ou 640 px."""
+    return SMALL_SIDE if side * SCREEN_W / max(1, crop_w) <= 560 else EDIT_SIDE
+
+
 def _blob(binary, keep):
     """Les plus grandes taches d'une image binaire (keep : combien), en masque 0/1."""
     import cv2
@@ -252,8 +259,9 @@ def run_talk(chapter, cfg=None, progress=None, only=None):
         x, y, w, h = frames[f["frame"]]["crop"]
         crop = strip[y:y + h, x:x + w]
         x0, y0, side = boxes[f["id"]] = square(f, w, h)
-        patch = cv2.resize(crop[y0:y0 + side, x0:x0 + side], (EDIT_SIDE, EDIT_SIDE),
-                           interpolation=cv2.INTER_AREA if side > EDIT_SIDE else cv2.INTER_CUBIC)
+        edit = edit_side(side, w)
+        patch = cv2.resize(crop[y0:y0 + side, x0:x0 + side], (edit, edit),
+                           interpolation=cv2.INTER_AREA if side > edit else cv2.INTER_CUBIC)
         src = folder / f"{f['id']}.png"
         png = cv2.imencode(".png", patch)[1].tobytes()
         if not src.is_file() or src.read_bytes() != png:  # inchangé : les dessins déjà faits restent bons
@@ -276,6 +284,9 @@ def run_talk(chapter, cfg=None, progress=None, only=None):
         job_file = folder / "jobs.json"
         job_file.write_text(json.dumps(jobs), encoding="utf-8")
         worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "edit_worker.py")
+        from manhwa.gpu import release_models
+
+        release_models()  # FLUX prend presque toute la carte
         proc = subprocess.Popen([str(edit_python()), "-u", worker, str(job_file)], stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
         for line in proc.stdout:

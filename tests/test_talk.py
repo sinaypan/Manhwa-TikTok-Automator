@@ -55,3 +55,8 @@ def test_zones_follow_what_the_drawing_changed():
     mouth, eye = talk.zones(original, drawn)
     assert mouth[185, 128] > 200 and mouth[40, 128] == 0 and mouth[95, 80] < 30
     assert eye[95, 80] > 200 and eye[95, 176] > 200 and eye[185, 128] == 0
+
+
+def test_small_faces_are_drawn_smaller():
+    assert talk.edit_side(300, 800) == talk.SMALL_SIDE  # ≈ 400 px à l'écran
+    assert talk.edit_side(700, 800) == talk.EDIT_SIDE   # ≈ 945 px à l'écran
